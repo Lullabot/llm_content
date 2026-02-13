@@ -65,7 +65,10 @@ final class LlmsTxtController extends ControllerBase {
           // Pre-fetch all stored markdown for this batch in one query.
           $batchMarkdown = $this->markdownConverter->getStoredMarkdownBatch($batch, $langcode);
           foreach ($nodes as $node) {
-            $title = $node->label() ?? 'Untitled';
+            // Sanitize title for markdown link safety: strip HTML and escape
+            // characters that could break markdown link syntax.
+            $title = strip_tags($node->label() ?? 'Untitled');
+            $title = str_replace(['[', ']'], ['(', ')'], $title);
             $url = Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()])->toString();
             $description = '';
             if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
@@ -102,7 +105,7 @@ final class LlmsTxtController extends ControllerBase {
 
     $cacheMetadata = new CacheableMetadata();
     $cacheMetadata->addCacheTags(['llm_content:list', 'node_list', 'path_alias_list']);
-    $cacheMetadata->addCacheContexts(['user.permissions']);
+    $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
     $response->addCacheableDependency($siteConfig);
@@ -124,7 +127,7 @@ final class LlmsTxtController extends ControllerBase {
 
     $cacheMetadata = new CacheableMetadata();
     $cacheMetadata->addCacheTags(['llm_content:list', 'node_list']);
-    $cacheMetadata->addCacheContexts(['user.permissions']);
+    $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
 

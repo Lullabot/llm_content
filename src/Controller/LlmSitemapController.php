@@ -109,7 +109,7 @@ final class LlmSitemapController extends ControllerBase {
 
     $cacheMetadata = new CacheableMetadata();
     $cacheMetadata->addCacheTags(['llm_content:list', 'node_list', 'path_alias_list']);
-    $cacheMetadata->addCacheContexts(['user.permissions']);
+    $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
 

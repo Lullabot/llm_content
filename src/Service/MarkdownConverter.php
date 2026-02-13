@@ -99,13 +99,16 @@ final class MarkdownConverter implements MarkdownConverterInterface {
 
     // Build frontmatter.
     $alias = $this->aliasManager->getAliasByPath('/node/' . $node->id());
-    $title = $node->label() ?? '';
+    $title = strip_tags($node->label() ?? '');
     // Sanitize title for YAML safety: escape quotes, strip control characters.
     $title = preg_replace('/[\x00-\x1f\x7f]/', '', $title) ?? $title;
     $title = str_replace(['\\', '"'], ['\\\\', '\\"'], $title);
+    // Sanitize alias for YAML safety: strip control chars and quote.
+    $alias = preg_replace('/[\x00-\x1f\x7f]/', '', $alias) ?? $alias;
+    $alias = str_replace(['\\', '"'], ['\\\\', '\\"'], $alias);
     $frontmatter = "---\n";
     $frontmatter .= 'title: "' . $title . "\"\n";
-    $frontmatter .= 'url: ' . $alias . "\n";
+    $frontmatter .= 'url: "' . $alias . "\"\n";
     $frontmatter .= 'type: ' . $node->bundle() . "\n";
     $frontmatter .= 'date: ' . $this->dateFormatter->format($node->getCreatedTime(), 'custom', 'Y-m-d') . "\n";
     if ($node->getRevisionCreationTime()) {
@@ -113,7 +116,10 @@ final class MarkdownConverter implements MarkdownConverterInterface {
     }
     $frontmatter .= "---\n\n";
 
-    $fullMarkdown = $frontmatter . '# ' . ($node->label() ?? '') . "\n\n" . trim($markdown);
+    // Strip HTML tags from the title for the heading to prevent XSS when
+    // consumers render the markdown back to HTML.
+    $headingTitle = strip_tags($node->label() ?? '');
+    $fullMarkdown = $frontmatter . '# ' . $headingTitle . "\n\n" . trim($markdown);
 
     // Store in database.
     $this->database->merge('llm_content_markdown')
@@ -330,18 +336,27 @@ final class MarkdownConverter implements MarkdownConverterInterface {
       return $output;
     }
 
-    // Join with node_field_data for access control and type filtering.
-    $query = $this->database->select('llm_content_markdown', 'm');
-    $query->innerJoin('node_field_data', 'n', 'm.nid = n.nid AND m.langcode = n.langcode');
-    $query->fields('m', ['markdown']);
-    $query->condition('n.status', 1);
-    $query->condition('n.type', $enabledTypes, 'IN');
-    $query->orderBy('m.nid', 'ASC');
-    $query->range(0, 500);
-    $results = $query->execute()->fetchCol();
+    // Use entity query with access check to enforce node access restrictions.
+    $nodeStorage = $this->entityTypeManager->getStorage('node');
+    $nids = $nodeStorage->getQuery()
+      ->condition('status', 1)
+      ->condition('type', $enabledTypes, 'IN')
+      ->accessCheck(TRUE)
+      ->sort('nid', 'ASC')
+      ->execute();
 
-    foreach ($results as $markdown) {
-      $output .= $markdown . "\n\n---\n\n";
+    if (!empty($nids)) {
+      // Fetch stored markdown for these access-checked nids.
+      $results = $this->database->select('llm_content_markdown', 'm')
+        ->fields('m', ['markdown'])
+        ->condition('nid', $nids, 'IN')
+        ->orderBy('nid', 'ASC')
+        ->execute()
+        ->fetchCol();
+
+      foreach ($results as $markdown) {
+        $output .= $markdown . "\n\n---\n\n";
+      }
     }
 
     return $output;

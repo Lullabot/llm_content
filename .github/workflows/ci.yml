@@ -55,6 +55,12 @@ jobs:
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
 
+      - name: Allow dev stability for dev builds
+        if: ${{ contains(matrix.drupal, 'dev') }}
+        run: |
+          composer config minimum-stability dev
+          composer config prefer-stable true
+
       - name: Set Drupal core version
         run: |
           composer require drupal/core-recommended:${{ matrix.drupal }} \

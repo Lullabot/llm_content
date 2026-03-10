@@ -14,6 +14,14 @@ $autoloader = require dirname(__DIR__, 5) . '/vendor/autoload.php';
 $autoloader->addPsr4('Drupal\\llm_content\\', dirname(__DIR__) . '/src');
 $autoloader->addPsr4('Drupal\\Tests\\llm_content\\', dirname(__DIR__) . '/tests/src');
 
+// Define requirement severity constants for D10 compatibility.
+if (!defined('REQUIREMENT_ERROR')) {
+  define('REQUIREMENT_ERROR', 2);
+}
+if (!defined('REQUIREMENT_OK')) {
+  define('REQUIREMENT_OK', 0);
+}
+
 // Register core module namespaces needed by unit tests.
 $webRoot = dirname(__DIR__, 4);
 $autoloader->addPsr4('Drupal\\path_alias\\', $webRoot . '/core/modules/path_alias/src');

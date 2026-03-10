@@ -15,6 +15,12 @@ services:
       - '@?xmlsitemap.link_storage'
       - '@datetime.time'
 
+  Drupal\llm_content\Hook\LlmContentHooks: {}
+
+  Drupal\llm_content\Hook\LlmContentRequirementsHooks: {}
+
+  Drupal\llm_content\Hook\LlmContentXmlSitemapHooks: {}
+
   llm_content.route_subscriber:
     class: Drupal\llm_content\Routing\RouteSubscriber
     tags:

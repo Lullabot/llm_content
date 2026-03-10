@@ -32,13 +32,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        experimental: [false]
         php-version: ["8.3"]
-        drupal: ["^10.4"]
+        drupal: ["^10.4", "~11.2.0"]
+        experimental: [false]
         include:
-          - php-version: "8.3"
-            drupal: "~11.2.0"
-            experimental: false
           - php-version: "8.4"
             drupal: "11.x-dev"
             experimental: true

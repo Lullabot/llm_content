@@ -31,14 +31,14 @@ final class LlmContentRequirementsHooks {
         'title' => $this->t('LLM Content - HTML to Markdown library'),
         'value' => $this->t('Not installed'),
         'description' => $this->t('The league/html-to-markdown library is required. Run <code>composer require league/html-to-markdown:^5.0</code> in your project root.'),
-        'severity' => REQUIREMENT_ERROR,
+        'severity' => \REQUIREMENT_ERROR,
       ];
     }
     else {
       $requirements['llm_content_html_to_markdown'] = [
         'title' => $this->t('LLM Content - HTML to Markdown library'),
         'value' => $this->t('Installed'),
-        'severity' => REQUIREMENT_OK,
+        'severity' => \REQUIREMENT_OK,
       ];
     }
 

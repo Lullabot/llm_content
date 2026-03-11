@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\llm_content\Unit;
 
-use Drupal\Core\Extension\Requirement\RequirementSeverity;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\llm_content\Hook\LlmContentRequirementsHooks;
 use PHPUnit\Framework\TestCase;
@@ -29,7 +28,7 @@ class LlmContentRequirementsHooksTest extends TestCase {
     $requirements = $hooks->runtimeRequirements();
 
     $this->assertArrayHasKey('llm_content_html_to_markdown', $requirements);
-    $this->assertSame(RequirementSeverity::OK, $requirements['llm_content_html_to_markdown']['severity']);
+    $this->assertSame(REQUIREMENT_OK, $requirements['llm_content_html_to_markdown']['severity']);
   }
 
 }

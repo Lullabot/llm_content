@@ -1,0 +1,78 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations for the LLM Content module.
+ *
+ * These procedural functions delegate to OOP service classes. On Drupal 11,
+ * the #[LegacyHook] attribute tells core to skip these and use the #[Hook]
+ * attributes on the service classes directly. On Drupal 10, these functions
+ * are the primary hook entry points.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Hook\Attribute\LegacyHook;
+use Drupal\llm_content\Hook\LlmContentHooks;
+use Drupal\llm_content\Hook\LlmContentRequirementsHooks;
+use Drupal\llm_content\Hook\LlmContentXmlSitemapHooks;
+
+/**
+ * Implements hook_entity_insert().
+ */
+#[LegacyHook]
+function llm_content_entity_insert(EntityInterface $entity): void {
+  \Drupal::service(LlmContentHooks::class)->entityInsert($entity);
+}
+
+/**
+ * Implements hook_entity_update().
+ */
+#[LegacyHook]
+function llm_content_entity_update(EntityInterface $entity): void {
+  \Drupal::service(LlmContentHooks::class)->entityUpdate($entity);
+}
+
+/**
+ * Implements hook_entity_delete().
+ */
+#[LegacyHook]
+function llm_content_entity_delete(EntityInterface $entity): void {
+  \Drupal::service(LlmContentHooks::class)->entityDelete($entity);
+}
+
+/**
+ * Implements hook_page_attachments().
+ *
+ * The &$page parameter is passed by reference through the service call.
+ * Changes made in LlmContentHooks::pageAttachments() propagate back.
+ */
+#[LegacyHook]
+function llm_content_page_attachments(array &$page): void {
+  \Drupal::service(LlmContentHooks::class)->pageAttachments($page);
+}
+
+/**
+ * Implements hook_cron().
+ */
+#[LegacyHook]
+function llm_content_cron(): void {
+  \Drupal::service(LlmContentHooks::class)->cron();
+}
+
+/**
+ * Implements hook_xmlsitemap_link_info().
+ */
+#[LegacyHook]
+function llm_content_xmlsitemap_link_info(): array {
+  return \Drupal::service(LlmContentXmlSitemapHooks::class)->xmlsitemapLinkInfo();
+}
+
+/**
+ * Implements hook_runtime_requirements().
+ */
+#[LegacyHook]
+function llm_content_runtime_requirements(): array {
+  return \Drupal::service(LlmContentRequirementsHooks::class)->runtimeRequirements();
+}

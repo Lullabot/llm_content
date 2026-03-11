@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\llm_content\Hook;
 
-use Drupal\Core\Extension\Requirement\RequirementSeverity;
 // phpcs:ignore Drupal.Classes.UnusedUseStatement.UnusedUse -- Used by #[Hook] attributes.
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
@@ -32,14 +31,14 @@ final class LlmContentRequirementsHooks {
         'title' => $this->t('LLM Content - HTML to Markdown library'),
         'value' => $this->t('Not installed'),
         'description' => $this->t('The league/html-to-markdown library is required. Run <code>composer require league/html-to-markdown:^5.0</code> in your project root.'),
-        'severity' => RequirementSeverity::Error,
+        'severity' => \REQUIREMENT_ERROR,
       ];
     }
     else {
       $requirements['llm_content_html_to_markdown'] = [
         'title' => $this->t('LLM Content - HTML to Markdown library'),
         'value' => $this->t('Installed'),
-        'severity' => RequirementSeverity::OK,
+        'severity' => \REQUIREMENT_OK,
       ];
     }
 

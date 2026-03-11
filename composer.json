@@ -12,7 +12,12 @@
   },
   "config": {
     "allow-plugins": {
-      "dealerdirect/phpcodesniffer-composer-installer": true
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "phpstan/extension-installer": true,
+      "drupal/core-composer-scaffold": true,
+      "composer/installers": true,
+      "drupal/core-project-message": true,
+      "php-http/discovery": true
     }
   },
   "scripts": {

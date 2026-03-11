@@ -8,6 +8,23 @@
 declare(strict_types=1);
 
 /**
+ * Implements hook_requirements().
+ */
+function llm_content_requirements(string $phase): array {
+  $requirements = [];
+  if ($phase === 'install') {
+    if (!class_exists('League\HTMLToMarkdown\HtmlConverter')) {
+      $requirements['llm_content_html_to_markdown'] = [
+        'title' => t('LLM Content - HTML to Markdown library'),
+        'description' => t('The league/html-to-markdown library is required. Run <code>composer require league/html-to-markdown:^5.0</code> in your project root.'),
+        'severity' => REQUIREMENT_ERROR,
+      ];
+    }
+  }
+  return $requirements;
+}
+
+/**
  * Implements hook_schema().
  */
 function llm_content_schema(): array {

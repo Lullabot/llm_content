@@ -19,12 +19,19 @@ use Symfony\Component\HttpFoundation\Request;
 class LlmMarkdownPathProcessorTest extends TestCase {
 
   /**
+   * Creates an AliasManagerInterface stub with a configured method return.
+   */
+  private function createAliasManagerStub(string $method, string $returnValue): AliasManagerInterface {
+    $stub = $this->createStub(AliasManagerInterface::class);
+    $stub->method($method)->willReturn($returnValue);
+    return $stub;
+  }
+
+  /**
    * @covers ::processInbound
    */
   public function testInboundResolvesAliasMdToNodeLlmMd(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getPathByAlias' => '/node/42',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getPathByAlias', '/node/42');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $result = $processor->processInbound('/my-article.md', Request::create('/my-article.md'));
@@ -48,9 +55,7 @@ class LlmMarkdownPathProcessorTest extends TestCase {
    * @covers ::processInbound
    */
   public function testInboundPassthroughWhenAliasDoesNotResolve(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getPathByAlias' => '/unknown-page',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getPathByAlias', '/unknown-page');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $result = $processor->processInbound('/unknown-page.md', Request::create('/unknown-page.md'));
@@ -74,9 +79,7 @@ class LlmMarkdownPathProcessorTest extends TestCase {
    * @covers ::processInbound
    */
   public function testInboundPassthroughWhenAliasResolvesToNonNodePath(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getPathByAlias' => '/taxonomy/term/5',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getPathByAlias', '/taxonomy/term/5');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $result = $processor->processInbound('/my-term.md', Request::create('/my-term.md'));
@@ -88,9 +91,7 @@ class LlmMarkdownPathProcessorTest extends TestCase {
    * @covers ::processOutbound
    */
   public function testOutboundConvertsNodeLlmMdToAliasMd(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getAliasByPath' => '/my-article',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getAliasByPath', '/my-article');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $result = $processor->processOutbound('/node/42/llm-md');
@@ -114,9 +115,7 @@ class LlmMarkdownPathProcessorTest extends TestCase {
    * @covers ::processOutbound
    */
   public function testOutboundKeepsPathWhenNoAliasExists(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getAliasByPath' => '/node/99',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getAliasByPath', '/node/99');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $result = $processor->processOutbound('/node/99/llm-md');
@@ -128,9 +127,7 @@ class LlmMarkdownPathProcessorTest extends TestCase {
    * @covers ::processOutbound
    */
   public function testOutboundAddsCacheTagToBubbleableMetadata(): void {
-    $aliasManager = $this->createConfiguredStub(AliasManagerInterface::class, [
-      'getAliasByPath' => '/my-article',
-    ]);
+    $aliasManager = $this->createAliasManagerStub('getAliasByPath', '/my-article');
     $processor = new LlmMarkdownPathProcessor($aliasManager);
 
     $metadata = new BubbleableMetadata();

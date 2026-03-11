@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - uses: ramsey/composer-install@v3
+
+      - name: PHPCS
+        run: vendor/bin/phpcs
+
+  test:
+    runs-on: ubuntu-24.04
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.3"]
+        drupal: ["^10.4", "~11.2.0"]
+        experimental: [false]
+        include:
+          - php-version: "8.4"
+            drupal: "11.x-dev"
+            experimental: true
+
+    continue-on-error: ${{ matrix.experimental }}
+    name: PHP ${{ matrix.php-version }} | Drupal ${{ matrix.drupal }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Allow dev stability for dev builds
+        if: ${{ contains(matrix.drupal, 'dev') }}
+        run: |
+          composer config minimum-stability dev
+          composer config prefer-stable true
+
+      - name: Set Drupal core version
+        run: |
+          composer require drupal/core-recommended:${{ matrix.drupal }} \
+            drupal/core-dev:${{ matrix.drupal }} \
+            --with-all-dependencies --no-update
+
+      - uses: ramsey/composer-install@v3
+
+      - name: Migrate PHPUnit configuration
+        run: php vendor/bin/phpunit --migrate-configuration || true
+
+      - name: Run PHPUnit
+        run: php vendor/bin/phpunit

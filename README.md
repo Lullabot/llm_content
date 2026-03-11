@@ -1,12 +1,12 @@
 # LLM Content
 
-A Drupal 11 module that generates markdown views of your site content for LLM crawlers and AI agents.
+A Drupal module that generates markdown views of your site content for LLM crawlers and AI agents. Supports Drupal 10.4+ and 11.2+.
 
 Keep your normal Drupal-rendered HTML for humans and classic SEO, while also serving parallel markdown versions for AI bots. LLM crawlers discover content via a dedicated sitemap and structured index files, getting a clean, low-noise representation that's easier to embed and summarize than raw HTML.
 
 ## Requirements
 
-- Drupal 11.1+
+- Drupal 10.4+ or 11.2+
 - PHP 8.3+
 - `league/html-to-markdown` ^5.0
 
@@ -161,7 +161,7 @@ src/
     XmlSitemapLinkManagerInterface.php
     XmlSitemapLinkManager.php         # Optional xmlsitemap link CRUD
   Hook/
-    LlmContentHooks.php              # Entity lifecycle hooks (D11 OOP attributes)
+    LlmContentHooks.php              # Entity lifecycle hooks (OOP with #[Hook] attributes)
     LlmContentXmlSitemapHooks.php    # hook_xmlsitemap_link_info
     LlmContentRequirementsHooks.php  # Runtime requirements checks
   Routing/
@@ -170,6 +170,7 @@ src/
     LlmContentSettingsForm.php        # Admin configuration form
   PathProcessor/
     LlmMarkdownPathProcessor.php      # Clean URL support for .md extension
+llm_content.module                    # LegacyHook shims for Drupal 10 compatibility
 ```
 
 ## License

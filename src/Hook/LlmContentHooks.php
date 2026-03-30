@@ -142,7 +142,13 @@ final class LlmContentHooks {
     }
 
     if ($node->isPublished()) {
-      $this->markdownConverter->convert($node);
+      // Queue markdown generation instead of running synchronously to avoid
+      // blocking entity save with render + DOM parse + markdown conversion.
+      $queue = $this->queueFactory->get('llm_content_markdown_generation');
+      $queue->createItem([
+        'nid' => (int) $node->id(),
+        'langcode' => $node->language()->getId(),
+      ]);
       if ($this->xmlSitemapLinkManager->isEnabled()) {
         $this->xmlSitemapLinkManager->saveNodeLink($node);
       }

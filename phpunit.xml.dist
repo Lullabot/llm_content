@@ -3,6 +3,10 @@
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="tests/bootstrap.php"
          colors="true">
+  <php>
+    <!-- Allow indirect deprecations from Symfony/Drupal core. -->
+    <env name="SYMFONY_DEPRECATIONS_HELPER" value="max[indirect]=99"/>
+  </php>
   <testsuites>
     <testsuite name="unit">
       <directory>tests/src/Unit</directory>

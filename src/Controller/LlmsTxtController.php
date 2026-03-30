@@ -7,6 +7,7 @@ namespace Drupal\llm_content\Controller;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Cache\CacheableResponse;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Url;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -18,6 +19,7 @@ final class LlmsTxtController extends ControllerBase {
 
   public function __construct(
     protected MarkdownConverterInterface $markdownConverter,
+    protected LanguageManagerInterface $languageManager,
   ) {}
 
   /**
@@ -26,6 +28,7 @@ final class LlmsTxtController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get(MarkdownConverterInterface::class),
+      $container->get('language_manager'),
     );
   }
 
@@ -56,8 +59,11 @@ final class LlmsTxtController extends ControllerBase {
 
       if (!empty($nids)) {
         $output .= "## Content\n\n";
+        $langcode = $this->languageManager->getCurrentLanguage()->getId();
         foreach (array_chunk($nids, 50) as $batch) {
           $nodes = $nodeStorage->loadMultiple($batch);
+          // Pre-fetch all stored markdown for this batch in one query.
+          $batchMarkdown = $this->markdownConverter->getStoredMarkdownBatch($batch, $langcode);
           foreach ($nodes as $node) {
             $title = $node->label() ?? 'Untitled';
             $url = Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()])->toString();
@@ -67,15 +73,11 @@ final class LlmsTxtController extends ControllerBase {
               $description = $body->summary ?: mb_substr(strip_tags($body->value ?? ''), 0, 200);
             }
             else {
-              // Fallback: use stored markdown (read-only).
-              $stored = $this->markdownConverter->getStoredMarkdown($node) ?? '';
-              // Remove YAML frontmatter block.
+              // Fallback: use batch-fetched markdown instead of per-node query.
+              $stored = $batchMarkdown[(int) $node->id()] ?? '';
               $stored = preg_replace('/^---\n.*?\n---\n+/s', '', $stored) ?? $stored;
-              // Remove the H1 title line.
               $stored = preg_replace('/^# .+\n+/', '', $stored) ?? $stored;
-              // Strip markdown formatting and collapse to single line.
               $stored = strip_tags($stored);
-              // Remove markdown headings, bold, italic, links syntax.
               $stored = preg_replace('/^#{1,6}\s+/m', '', $stored) ?? $stored;
               $stored = preg_replace('/\*{1,2}([^*]+)\*{1,2}/', '$1', $stored) ?? $stored;
               $stored = preg_replace('/\[([^\]]+)\]\([^)]+\)/', '$1', $stored) ?? $stored;

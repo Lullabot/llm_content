@@ -287,6 +287,21 @@ final class MarkdownConverter implements MarkdownConverterInterface {
   /**
    * {@inheritdoc}
    */
+  public function getStoredMarkdownBatch(array $nids, string $langcode): array {
+    if (empty($nids)) {
+      return [];
+    }
+    return $this->database->select('llm_content_markdown', 'm')
+      ->fields('m', ['nid', 'markdown'])
+      ->condition('nid', $nids, 'IN')
+      ->condition('langcode', $langcode)
+      ->execute()
+      ->fetchAllKeyed();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function deleteMarkdown(int $nid, ?string $langcode = NULL): void {
     $query = $this->database->delete('llm_content_markdown')
       ->condition('nid', $nid);

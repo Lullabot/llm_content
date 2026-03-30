@@ -63,6 +63,19 @@ interface MarkdownConverterInterface {
   public function generateFullText(): string;
 
   /**
+   * Gets stored markdown for multiple nodes in a single query.
+   *
+   * @param int[] $nids
+   *   Array of node IDs.
+   * @param string $langcode
+   *   The language code.
+   *
+   * @return array<int, string>
+   *   Associative array keyed by nid with markdown values.
+   */
+  public function getStoredMarkdownBatch(array $nids, string $langcode): array;
+
+  /**
    * Finds published node IDs of given types that have no stored markdown.
    *
    * Uses a SQL anti-join for efficient querying on large sites.

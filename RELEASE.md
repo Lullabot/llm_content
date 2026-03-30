@@ -5,7 +5,6 @@ This module uses [semantic versioning](https://semver.org/) with GitHub releases
 ## Branch rules
 
 - **main** is protected — all changes require a pull request with:
-  - At least 1 approving review
   - Passing CI checks (lint + tests on Drupal 10.4 and 11.2)
   - Up-to-date branch (no stale merges)
 - Direct pushes to main are not allowed

@@ -7,12 +7,27 @@ namespace Drupal\llm_content\Controller;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Cache\CacheableResponse;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Url;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * Controller for the LLM sitemap XML endpoint.
  */
 final class LlmSitemapController extends ControllerBase {
+
+  public function __construct(
+    protected Connection $database,
+  ) {}
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container): static {
+    return new static(
+      $container->get('database'),
+    );
+  }
 
   /**
    * Generates the LLM sitemap XML.
@@ -32,36 +47,33 @@ final class LlmSitemapController extends ControllerBase {
     $xml->writeAttribute('xmlns', 'http://www.sitemaps.org/schemas/sitemap/0.9');
 
     if (!empty($enabledTypes)) {
-      $nodeStorage = $this->entityTypeManager()->getStorage('node');
-      $query = $nodeStorage->getQuery()
-        ->condition('status', 1)
-        ->condition('type', $enabledTypes, 'IN')
-        ->accessCheck(TRUE)
-        ->sort('changed', 'DESC')
-        ->range(0, 50000);
-      $nids = $query->execute();
+      // Use a direct DB query to avoid loading full entity objects.
+      // The sitemap only needs nid and changed time.
+      $query = $this->database->select('node_field_data', 'n');
+      $query->fields('n', ['nid', 'changed']);
+      $query->condition('n.status', 1);
+      $query->condition('n.type', $enabledTypes, 'IN');
+      $query->condition('n.default_langcode', 1);
+      $query->orderBy('n.changed', 'DESC');
+      $query->range(0, 50000);
+      $results = $query->execute();
 
-      foreach (array_chunk($nids, 100) as $batch) {
-        $nodes = $nodeStorage->loadMultiple($batch);
-        foreach ($nodes as $node) {
-          $xml->startElement('url');
+      foreach ($results as $row) {
+        $xml->startElement('url');
 
-          $xml->startElement('loc');
-          $xml->text(Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()], ['absolute' => TRUE])->toString());
-          $xml->endElement();
+        $xml->startElement('loc');
+        $xml->text(Url::fromRoute('llm_content.markdown_view', ['node' => $row->nid], ['absolute' => TRUE])->toString());
+        $xml->endElement();
 
-          $xml->startElement('lastmod');
-          $xml->text(date('Y-m-d\TH:i:sP', (int) $node->getChangedTime()));
-          $xml->endElement();
+        $xml->startElement('lastmod');
+        $xml->text(date('Y-m-d\TH:i:sP', (int) $row->changed));
+        $xml->endElement();
 
-          $xml->startElement('changefreq');
-          $xml->text('weekly');
-          $xml->endElement();
+        $xml->startElement('changefreq');
+        $xml->text('weekly');
+        $xml->endElement();
 
-          // Url.
-          $xml->endElement();
-        }
-        $nodeStorage->resetCache($batch);
+        $xml->endElement();
       }
     }
 

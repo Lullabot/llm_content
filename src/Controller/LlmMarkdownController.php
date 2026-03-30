@@ -10,7 +10,7 @@ use Drupal\Core\Controller\ControllerBase;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Drupal\node\NodeInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Controller for serving node markdown views.
@@ -37,14 +37,16 @@ final class LlmMarkdownController extends ControllerBase {
     $config = $this->config('llm_content.settings');
     $enabledTypes = $config->get('enabled_content_types') ?? [];
 
-    // Check if this content type is enabled.
-    if (!in_array($node->bundle(), $enabledTypes, TRUE)) {
-      throw new NotFoundHttpException();
-    }
-
-    // Check if the node is published.
-    if (!$node->isPublished()) {
-      throw new NotFoundHttpException();
+    // Return a cacheable 404 for disabled types or unpublished nodes so
+    // repeated requests are served from cache instead of hitting PHP.
+    if (!in_array($node->bundle(), $enabledTypes, TRUE) || !$node->isPublished()) {
+      $response = new CacheableResponse('', Response::HTTP_NOT_FOUND);
+      $cacheMetadata = new CacheableMetadata();
+      $cacheMetadata->addCacheTags(['node:' . $node->id()]);
+      $response->addCacheableDependency($cacheMetadata);
+      $response->addCacheableDependency($node);
+      $response->addCacheableDependency($config);
+      return $response;
     }
 
     $markdown = $this->markdownConverter->getMarkdown($node);

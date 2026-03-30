@@ -22,12 +22,12 @@ Follow semver: `MAJOR.MINOR.PATCH`
 ## Creating a release
 
 1. Ensure main is up to date and CI is green
-2. Tag the release:
+2. Tag the release (replace `v1.2.3` with the new version):
    ```bash
    git checkout main
    git pull
-   git tag v1.x.x
-   git push origin v1.x.x
+   git tag v1.2.3
+   git push origin v1.2.3
    ```
 3. The [release workflow](.github/workflows/release.yml) automatically creates a GitHub release with generated changelog
 

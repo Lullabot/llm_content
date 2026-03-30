@@ -8,12 +8,15 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Drush\Attributes as CLI;
+use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
 
 /**
  * Drush commands for the LLM Content module.
  */
 final class LlmContentCommands extends DrushCommands {
+
+  use AutowireTrait;
 
   public function __construct(
     protected MarkdownConverterInterface $markdownConverter,

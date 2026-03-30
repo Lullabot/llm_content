@@ -39,7 +39,11 @@ if (!defined('REQUIREMENT_ERROR')) {
 // In a full Drupal site these live under web/core/modules; in CI they are
 // under vendor/drupal/core/modules.
 $corePaths = [
+  // Drupal site: web/modules/custom/llm_content -> web/core/modules.
+  dirname($moduleRoot, 3) . '/core/modules',
+  // Drupal site: modules/custom/llm_content -> core/modules (no web/ prefix).
   dirname($moduleRoot, 4) . '/core/modules',
+  // CI standalone: vendor/drupal/core/modules.
   $moduleRoot . '/vendor/drupal/core/modules',
 ];
 foreach ($corePaths as $corePath) {

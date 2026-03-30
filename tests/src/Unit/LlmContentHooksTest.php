@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\llm_content\Unit;
 
+use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Config\ImmutableConfig;
+use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Queue\QueueInterface;
@@ -60,6 +62,11 @@ class LlmContentHooksTest extends TestCase {
    */
   protected function setUp(): void {
     parent::setUp();
+
+    // Cache::invalidateTags() calls the static \Drupal container.
+    $container = new ContainerBuilder();
+    $container->set('cache_tags.invalidator', $this->createMock(CacheTagsInvalidatorInterface::class));
+    \Drupal::setContainer($container);
 
     $this->markdownConverter = $this->createMock(MarkdownConverterInterface::class);
     $this->configFactory = $this->createMock(ConfigFactoryInterface::class);

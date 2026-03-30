@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\llm_content\Unit;
 
 use Drupal\Core\Cache\CacheableResponse;
+use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
@@ -57,8 +58,12 @@ class LlmMarkdownControllerTest extends TestCase {
       ->with('llm_content.settings')
       ->willReturn($config);
 
+    $cacheContextsManager = $this->createMock(CacheContextsManager::class);
+    $cacheContextsManager->method('assertValidTokens')->willReturn(TRUE);
+
     $container = new ContainerBuilder();
     $container->set('config.factory', $configFactory);
+    $container->set('cache_contexts_manager', $cacheContextsManager);
     \Drupal::setContainer($container);
 
     $this->controller = new LlmMarkdownController($this->markdownConverter);

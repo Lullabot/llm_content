@@ -16,6 +16,12 @@ jobs:
           php-version: '8.3'
           tools: composer
 
+      - name: Clear composer github auth
+        # See ci.yml for rationale. setup-php's auto-configured oauth
+        # token occasionally arrives whitespace-mangled and composer
+        # rejects it; our deps are public, so anonymous access works.
+        run: composer config --global --unset github-oauth.github.com || true
+
       - run: composer install --no-interaction --prefer-dist
 
       - run: composer phpcs

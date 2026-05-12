@@ -7,6 +7,7 @@ namespace Drupal\llm_content\Drush\Commands;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
+use Drupal\llm_content\Service\XmlSitemapLinkManagerInterface;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -22,6 +23,7 @@ final class LlmContentCommands extends DrushCommands {
     protected MarkdownConverterInterface $markdownConverter,
     protected ConfigFactoryInterface $configFactory,
     protected EntityTypeManagerInterface $entityTypeManager,
+    protected XmlSitemapLinkManagerInterface $xmlSitemapLinkManager,
   ) {
     parent::__construct();
   }
@@ -102,6 +104,24 @@ final class LlmContentCommands extends DrushCommands {
     }
 
     $this->logger()->success("Done. Generated: {$processed}, Failed: {$failed}, Total: {$total}.");
+  }
+
+  /**
+   * Rebuild xmlsitemap links for all LLM content URLs.
+   */
+  #[CLI\Command(name: 'llm:sitemap-sync', aliases: ['llm-sitemap-sync'])]
+  #[CLI\Usage(name: 'drush llm:sitemap-sync', description: 'Backfill xmlsitemap entries for existing nodes.')]
+  public function sitemapSync(): void {
+    if (!$this->xmlSitemapLinkManager->isAvailable()) {
+      $this->logger()->error('The xmlsitemap module is not installed.');
+      return;
+    }
+    if (!$this->xmlSitemapLinkManager->isEnabled()) {
+      $this->logger()->warning('xmlsitemap_integration is disabled in llm_content.settings. Enable it first.');
+      return;
+    }
+    $this->xmlSitemapLinkManager->syncAllLinks();
+    $this->logger()->success('LLM content links synced into xmlsitemap. Run cron or rebuild the sitemap to publish.');
   }
 
 }

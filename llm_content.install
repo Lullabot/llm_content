@@ -70,6 +70,24 @@ function llm_content_schema(): array {
  */
 function llm_content_install(): void {
   _llm_content_queue_missing_nodes();
+  _llm_content_sync_xmlsitemap_if_enabled();
+}
+
+/**
+ * Syncs LLM content links into xmlsitemap when integration is enabled.
+ *
+ * Runs at install and from update hooks so sites that import config with
+ * xmlsitemap_integration already TRUE backfill existing nodes, matching
+ * the behavior of toggling the setting through the UI.
+ */
+function _llm_content_sync_xmlsitemap_if_enabled(): void {
+  /** @var \Drupal\llm_content\Service\XmlSitemapLinkManagerInterface $manager */
+  $manager = \Drupal::service('Drupal\llm_content\Service\XmlSitemapLinkManagerInterface');
+  if (!$manager->isEnabled()) {
+    return;
+  }
+  $manager->syncAllLinks();
+  \Drupal::logger('llm_content')->notice('Synced LLM content links into xmlsitemap.');
 }
 
 /**
@@ -118,4 +136,15 @@ function llm_content_update_11001(): void {
     }
   }
   $config->save();
+}
+
+/**
+ * Backfill xmlsitemap links for existing nodes when integration is enabled.
+ *
+ * Sites that imported config with xmlsitemap_integration: true never
+ * triggered the settings form submit handler, so the link table was empty
+ * even though the standalone /sitemap-llm.xml worked. This populates it.
+ */
+function llm_content_update_11002(): void {
+  _llm_content_sync_xmlsitemap_if_enabled();
 }

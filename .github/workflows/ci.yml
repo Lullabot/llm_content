@@ -63,6 +63,16 @@ jobs:
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
 
+      - name: Clear composer github auth
+        # setup-php auto-configures github-oauth from the runner's
+        # GITHUB_TOKEN; that token occasionally arrives whitespace-
+        # mangled and composer rejects it on the very next composer
+        # invocation. Run this first so every subsequent composer
+        # step (config, require, install) is safe. Our deps are
+        # public Packagist packages, so anonymous github.com access
+        # is fine.
+        run: composer config --global --unset github-oauth.github.com || true
+
       - name: Allow dev stability for dev builds
         if: ${{ contains(matrix.drupal, 'dev') }}
         run: |
@@ -74,14 +84,6 @@ jobs:
           composer require drupal/core-recommended:${{ matrix.drupal }} \
             drupal/core-dev:${{ matrix.drupal }} \
             --with-all-dependencies --no-update
-
-      - name: Clear composer github auth
-        # setup-php auto-configures github-oauth from the runner's
-        # GITHUB_TOKEN; that token occasionally arrives whitespace-
-        # mangled and composer rejects it. Drop the auth — our deps
-        # are public Packagist packages, so anonymous github.com
-        # access is fine.
-        run: composer config --global --unset github-oauth.github.com || true
 
       - name: Composer install
         run: composer install --no-interaction --prefer-dist --no-progress

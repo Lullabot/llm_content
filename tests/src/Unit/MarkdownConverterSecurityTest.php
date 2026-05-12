@@ -162,6 +162,54 @@ class MarkdownConverterSecurityTest extends TestCase {
   }
 
   /**
+   * Markdown brackets in titles must not appear verbatim in the H1.
+   *
+   * Without sanitization, a title of `[click](javascript:alert(1))` lands
+   * verbatim in the H1 and renders as a malicious link when consumers
+   * convert the markdown back to HTML. The fix replaces `[`/`]` with
+   * `(`/`)` — same defense the llms.txt link title uses.
+   *
+   * @covers ::convert
+   */
+  public function testConvertReplacesBracketsInHeadingTitle(): void {
+    [$converter, $node] = $this->buildConverterForConvert(
+      label: '[click](javascript:alert(1))',
+    );
+
+    $output = $converter->convert($node);
+
+    // Brackets in the heading have been neutralized.
+    $this->assertMatchesRegularExpression(
+      '/^# \(click\)\(javascript:alert\(1\)\)\n/m',
+      $output,
+    );
+    $this->assertStringNotContainsString('# [click]', $output);
+  }
+
+  /**
+   * Control characters in titles must be stripped from the H1.
+   *
+   * A newline in the title would break the markdown H1 line and could
+   * inject additional headings or arbitrary content.
+   *
+   * @covers ::convert
+   */
+  public function testConvertStripsControlCharsFromHeadingTitle(): void {
+    [$converter, $node] = $this->buildConverterForConvert(
+      label: "Innocent\n## Injected H2",
+    );
+
+    $output = $converter->convert($node);
+
+    // The newline is gone, so no second-level heading can be injected.
+    $this->assertMatchesRegularExpression(
+      '/^# Innocent## Injected H2\n/m',
+      $output,
+    );
+    $this->assertDoesNotMatchRegularExpression('/^## Injected H2$/m', $output);
+  }
+
+  /**
    * Double quotes and backslashes in titles must be YAML-escaped.
    *
    * Without escaping, a title containing `"` breaks the YAML
@@ -376,6 +424,17 @@ class MarkdownConverterSecurityTest extends TestCase {
       $select->method('condition')->willReturnSelf();
       $select->method('orderBy')->willReturnSelf();
       $select->method('execute')->willReturn($statement);
+      // Asserts the canonical-translation join was added on top of the
+      // access-check fix — otherwise multilingual sites would emit one
+      // copy of the same node per stored language.
+      $select->expects($this->once())
+        ->method('innerJoin')
+        ->with(
+          'node_field_data',
+          'n',
+          $this->stringContains('n.langcode = m.langcode'),
+        )
+        ->willReturnSelf();
 
       $database->expects($this->once())
         ->method('select')

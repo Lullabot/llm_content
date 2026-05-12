@@ -116,9 +116,13 @@ final class MarkdownConverter implements MarkdownConverterInterface {
     }
     $frontmatter .= "---\n\n";
 
-    // Strip HTML tags from the title for the heading to prevent XSS when
-    // consumers render the markdown back to HTML.
+    // Sanitize the title for the H1 heading: strip HTML, control chars,
+    // and brackets that could be used to inject markdown links (e.g. a
+    // node title of `[text](javascript:alert(1))` would otherwise land
+    // verbatim in the heading and execute when rendered back to HTML).
     $headingTitle = strip_tags($node->label() ?? '');
+    $headingTitle = preg_replace('/[\x00-\x1f\x7f]/', '', $headingTitle) ?? $headingTitle;
+    $headingTitle = str_replace(['[', ']'], ['(', ')'], $headingTitle);
     $fullMarkdown = $frontmatter . '# ' . $headingTitle . "\n\n" . trim($markdown);
 
     // Store in database.
@@ -346,13 +350,17 @@ final class MarkdownConverter implements MarkdownConverterInterface {
       ->execute();
 
     if (!empty($nids)) {
-      // Fetch stored markdown for these access-checked nids.
-      $results = $this->database->select('llm_content_markdown', 'm')
-        ->fields('m', ['markdown'])
-        ->condition('nid', $nids, 'IN')
-        ->orderBy('nid', 'ASC')
-        ->execute()
-        ->fetchCol();
+      // Fetch stored markdown for the access-checked nids. Join on
+      // node_field_data with default_langcode = 1 so multilingual nodes
+      // only contribute their canonical translation — without this we
+      // would emit one copy per language stored in llm_content_markdown.
+      $query = $this->database->select('llm_content_markdown', 'm');
+      $query->innerJoin('node_field_data', 'n', 'n.nid = m.nid AND n.langcode = m.langcode');
+      $query->fields('m', ['markdown']);
+      $query->condition('m.nid', $nids, 'IN');
+      $query->condition('n.default_langcode', 1);
+      $query->orderBy('m.nid', 'ASC');
+      $results = $query->execute()->fetchCol();
 
       foreach ($results as $markdown) {
         $output .= $markdown . "\n\n---\n\n";

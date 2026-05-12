@@ -108,20 +108,28 @@ final class LlmContentCommands extends DrushCommands {
 
   /**
    * Rebuild xmlsitemap links for all LLM content URLs.
+   *
+   * Returns DrushCommands::EXIT_FAILURE when xmlsitemap is missing or
+   * integration is disabled in config, so CI/deploy scripts can detect
+   * the no-op via the command's exit status.
    */
   #[CLI\Command(name: 'llm:sitemap-sync', aliases: ['llm-sitemap-sync'])]
   #[CLI\Usage(name: 'drush llm:sitemap-sync', description: 'Backfill xmlsitemap entries for existing nodes.')]
-  public function sitemapSync(): void {
+  public function sitemapSync(): int {
     if (!$this->xmlSitemapLinkManager->isAvailable()) {
       $this->logger()->error('The xmlsitemap module is not installed.');
-      return;
+      return self::EXIT_FAILURE;
     }
     if (!$this->xmlSitemapLinkManager->isEnabled()) {
       $this->logger()->warning('xmlsitemap_integration is disabled in llm_content.settings. Enable it first.');
-      return;
+      return self::EXIT_FAILURE;
     }
-    $this->xmlSitemapLinkManager->syncAllLinks();
-    $this->logger()->success('LLM content links synced into xmlsitemap. Run cron or rebuild the sitemap to publish.');
+    $count = $this->xmlSitemapLinkManager->syncAllLinks();
+    $this->logger()->success(sprintf(
+      'Synced %d LLM content links into xmlsitemap. Run cron or rebuild the sitemap to publish.',
+      $count,
+    ));
+    return self::EXIT_SUCCESS;
   }
 
 }

@@ -7,6 +7,8 @@
 
 declare(strict_types=1);
 
+use Drupal\llm_content\Service\XmlSitemapLinkManagerInterface;
+
 /**
  * Implements hook_requirements().
  */
@@ -92,12 +94,14 @@ function llm_content_install(): void {
  */
 function _llm_content_sync_xmlsitemap_if_enabled(): void {
   /** @var \Drupal\llm_content\Service\XmlSitemapLinkManagerInterface $manager */
-  $manager = \Drupal::service('Drupal\llm_content\Service\XmlSitemapLinkManagerInterface');
+  $manager = \Drupal::service(XmlSitemapLinkManagerInterface::class);
   if (!$manager->isEnabled()) {
     return;
   }
-  $manager->syncAllLinks();
-  \Drupal::logger('llm_content')->notice('Synced LLM content links into xmlsitemap.');
+  $count = $manager->syncAllLinks();
+  \Drupal::logger('llm_content')->notice('Synced @count LLM content links into xmlsitemap.', [
+    '@count' => $count,
+  ]);
 }
 
 /**

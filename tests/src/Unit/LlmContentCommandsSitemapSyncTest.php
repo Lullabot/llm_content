@@ -132,8 +132,9 @@ class LlmContentCommandsSitemapSyncTest extends TestCase {
     $manager->expects($this->never())->method('isEnabled');
     $manager->expects($this->never())->method('syncAllLinks');
 
-    $command->sitemapSync();
+    $exitCode = $command->sitemapSync();
 
+    $this->assertSame(DrushCommands::EXIT_FAILURE, $exitCode);
     $this->assertLoggedAt($logger, 'error', 'xmlsitemap module is not installed');
   }
 
@@ -149,8 +150,9 @@ class LlmContentCommandsSitemapSyncTest extends TestCase {
     $manager->method('isEnabled')->willReturn(FALSE);
     $manager->expects($this->never())->method('syncAllLinks');
 
-    $command->sitemapSync();
+    $exitCode = $command->sitemapSync();
 
+    $this->assertSame(DrushCommands::EXIT_FAILURE, $exitCode);
     $this->assertLoggedAt($logger, 'warning', 'xmlsitemap_integration is disabled');
   }
 
@@ -164,15 +166,19 @@ class LlmContentCommandsSitemapSyncTest extends TestCase {
 
     $manager->method('isAvailable')->willReturn(TRUE);
     $manager->method('isEnabled')->willReturn(TRUE);
-    $manager->expects($this->once())->method('syncAllLinks');
+    $manager->expects($this->once())
+      ->method('syncAllLinks')
+      ->willReturn(42);
 
-    $command->sitemapSync();
+    $exitCode = $command->sitemapSync();
 
+    $this->assertSame(DrushCommands::EXIT_SUCCESS, $exitCode);
     // No error or warning on the happy path.
     $this->assertNotContains('error', $this->levels($logger));
     $this->assertNotContains('warning', $this->levels($logger));
     // Drush's success() level is recorded by __call on the test logger.
-    $this->assertLoggedAt($logger, 'success', 'synced into xmlsitemap');
+    // The reported count should match the value returned by syncAllLinks().
+    $this->assertLoggedAt($logger, 'success', 'Synced 42 LLM content links');
   }
 
 }

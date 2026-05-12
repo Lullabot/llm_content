@@ -22,6 +22,21 @@ use Psr\Log\AbstractLogger;
 class LlmContentCommandsSitemapSyncTest extends TestCase {
 
   /**
+   * Skips the test when Drush is not in the autoloader.
+   *
+   * The CI test job installs drupal/core but not drush/drush, so the
+   * LlmContentCommands class (which extends DrushCommands) cannot load.
+   * These tests are intended to run in environments where Drush is
+   * available (developer machines, integration test environments).
+   */
+  protected function setUp(): void {
+    parent::setUp();
+    if (!class_exists(DrushCommands::class)) {
+      $this->markTestSkipped('Drush is not installed in this environment.');
+    }
+  }
+
+  /**
    * Builds the command with mocked deps and a recording logger.
    *
    * Uses ReflectionClass::newInstanceWithoutConstructor() to skip

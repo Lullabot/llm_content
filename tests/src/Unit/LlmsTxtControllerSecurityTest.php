@@ -8,8 +8,6 @@ use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
-use Drupal\Core\Language\LanguageInterface;
-use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\llm_content\Controller\LlmsTxtController;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use PHPUnit\Framework\TestCase;
@@ -73,15 +71,14 @@ class LlmsTxtControllerSecurityTest extends TestCase {
     $container->set('cache_contexts_manager', $cacheContextsManager);
     \Drupal::setContainer($container);
 
-    $language = $this->createMock(LanguageInterface::class);
-    $language->method('getId')->willReturn('en');
-    $languageManager = $this->createMock(LanguageManagerInterface::class);
-    $languageManager->method('getCurrentLanguage')->willReturn($language);
-
     $markdownConverter = $this->createMock(MarkdownConverterInterface::class);
     $markdownConverter->method('generateFullText')->willReturn('# Site');
 
-    $this->controller = new LlmsTxtController($markdownConverter, $languageManager);
+    // Note: ControllerBase::languageManager() pulls from the container
+    // lazily, but enabled_content_types is empty here so llmsTxt()
+    // never enters the branch that calls it. No language_manager
+    // service registration needed.
+    $this->controller = new LlmsTxtController($markdownConverter);
   }
 
   /**

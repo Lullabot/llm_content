@@ -116,9 +116,9 @@ final class XmlSitemapLinkManager implements XmlSitemapLinkManagerInterface {
   /**
    * {@inheritdoc}
    */
-  public function saveIndexLinks(): void {
+  public function saveIndexLinks(): int {
     if (!$this->isEnabled()) {
-      return;
+      return 0;
     }
 
     $config = $this->configFactory->get('llm_content.settings');
@@ -130,6 +130,7 @@ final class XmlSitemapLinkManager implements XmlSitemapLinkManagerInterface {
       'llms_full_txt' => '/llms-full.txt',
     ];
 
+    $saved = 0;
     foreach ($indexLinks as $id => $loc) {
       $link = [
         'type' => self::LINK_TYPE,
@@ -144,28 +145,30 @@ final class XmlSitemapLinkManager implements XmlSitemapLinkManagerInterface {
         'changefreq' => $changefreq,
       ];
       $this->linkStorage->save($link);
+      $saved++;
     }
+    return $saved;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function syncAllLinks(): void {
+  public function syncAllLinks(): int {
     if (!$this->isEnabled()) {
-      return;
+      return 0;
     }
 
     // Remove existing links first.
     $this->removeAllLinks();
 
     // Save index links.
-    $this->saveIndexLinks();
+    $saved = $this->saveIndexLinks();
 
     // Save links for all nodes with stored markdown in batches.
     $config = $this->configFactory->get('llm_content.settings');
     $enabledTypes = $config->get('enabled_content_types') ?? [];
     if (empty($enabledTypes)) {
-      return;
+      return $saved;
     }
 
     $priority = (float) $config->get('xmlsitemap_priority');
@@ -195,10 +198,13 @@ final class XmlSitemapLinkManager implements XmlSitemapLinkManagerInterface {
           'changefreq' => $changefreq,
         ];
         $this->linkStorage->save($link);
+        $saved++;
       }
 
       $offset += self::SYNC_BATCH_SIZE;
     } while (count($results) === self::SYNC_BATCH_SIZE);
+
+    return $saved;
   }
 
   /**

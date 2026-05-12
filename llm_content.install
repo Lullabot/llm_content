@@ -7,6 +7,8 @@
 
 declare(strict_types=1);
 
+use Drupal\llm_content\Service\XmlSitemapLinkManagerInterface;
+
 /**
  * Implements hook_requirements().
  */
@@ -70,6 +72,36 @@ function llm_content_schema(): array {
  */
 function llm_content_install(): void {
   _llm_content_queue_missing_nodes();
+  _llm_content_sync_xmlsitemap_if_enabled();
+}
+
+/**
+ * Syncs LLM content links into xmlsitemap when integration is enabled.
+ *
+ * Runs at install and from update hooks so sites that import config with
+ * xmlsitemap_integration already TRUE backfill existing nodes, matching
+ * the behavior of toggling the setting through the UI.
+ *
+ * The install-hook call only fires when xmlsitemap_integration is already
+ * TRUE at install time. Sites whose config import flips it from FALSE to
+ * TRUE *after* module install will not trigger here — they rely on
+ * llm_content_update_11002 or `drush llm:sitemap-sync` to backfill.
+ *
+ * Note: syncAllLinks() runs in 100-row batches inside a single request.
+ * On very large datasets (~50k+ nodes) the update hook could exceed PHP
+ * time limits; operators should run `drush llm:sitemap-sync` manually in
+ * that case rather than relying on `drush updb`.
+ */
+function _llm_content_sync_xmlsitemap_if_enabled(): void {
+  /** @var \Drupal\llm_content\Service\XmlSitemapLinkManagerInterface $manager */
+  $manager = \Drupal::service(XmlSitemapLinkManagerInterface::class);
+  if (!$manager->isEnabled()) {
+    return;
+  }
+  $count = $manager->syncAllLinks();
+  \Drupal::logger('llm_content')->notice('Synced @count LLM content links into xmlsitemap.', [
+    '@count' => $count,
+  ]);
 }
 
 /**
@@ -118,4 +150,15 @@ function llm_content_update_11001(): void {
     }
   }
   $config->save();
+}
+
+/**
+ * Backfill xmlsitemap links for existing nodes when integration is enabled.
+ *
+ * Sites that imported config with xmlsitemap_integration: true never
+ * triggered the settings form submit handler, so the link table was empty
+ * even though the standalone /sitemap-llm.xml worked. This populates it.
+ */
+function llm_content_update_11002(): void {
+  _llm_content_sync_xmlsitemap_if_enabled();
 }

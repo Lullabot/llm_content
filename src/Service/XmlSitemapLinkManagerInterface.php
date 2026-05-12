@@ -33,13 +33,20 @@ interface XmlSitemapLinkManagerInterface {
 
   /**
    * Saves sitemap links for the llms.txt and llms-full.txt index endpoints.
+   *
+   * @return int
+   *   The number of index links saved (0 when integration is disabled).
    */
-  public function saveIndexLinks(): void;
+  public function saveIndexLinks(): int;
 
   /**
    * Rebuilds all LLM content sitemap links.
+   *
+   * @return int
+   *   The total number of links saved (index endpoints + node links).
+   *   Returns 0 when integration is disabled.
    */
-  public function syncAllLinks(): void;
+  public function syncAllLinks(): int;
 
   /**
    * Removes all LLM content sitemap links.

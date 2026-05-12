@@ -7,6 +7,7 @@ namespace Drupal\llm_content\Drush\Commands;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
+use Drupal\llm_content\Service\XmlSitemapLinkManagerInterface;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -22,6 +23,7 @@ final class LlmContentCommands extends DrushCommands {
     protected MarkdownConverterInterface $markdownConverter,
     protected ConfigFactoryInterface $configFactory,
     protected EntityTypeManagerInterface $entityTypeManager,
+    protected XmlSitemapLinkManagerInterface $xmlSitemapLinkManager,
   ) {
     parent::__construct();
   }
@@ -102,6 +104,32 @@ final class LlmContentCommands extends DrushCommands {
     }
 
     $this->logger()->success("Done. Generated: {$processed}, Failed: {$failed}, Total: {$total}.");
+  }
+
+  /**
+   * Rebuild xmlsitemap links for all LLM content URLs.
+   *
+   * Returns DrushCommands::EXIT_FAILURE when xmlsitemap is missing or
+   * integration is disabled in config, so CI/deploy scripts can detect
+   * the no-op via the command's exit status.
+   */
+  #[CLI\Command(name: 'llm:sitemap-sync', aliases: ['llm-sitemap-sync'])]
+  #[CLI\Usage(name: 'drush llm:sitemap-sync', description: 'Backfill xmlsitemap entries for existing nodes.')]
+  public function sitemapSync(): int {
+    if (!$this->xmlSitemapLinkManager->isAvailable()) {
+      $this->logger()->error('The xmlsitemap module is not installed.');
+      return self::EXIT_FAILURE;
+    }
+    if (!$this->xmlSitemapLinkManager->isEnabled()) {
+      $this->logger()->warning('xmlsitemap_integration is disabled in llm_content.settings. Enable it first.');
+      return self::EXIT_FAILURE;
+    }
+    $count = $this->xmlSitemapLinkManager->syncAllLinks();
+    $this->logger()->success(sprintf(
+      'Synced %d LLM content links into xmlsitemap. Run cron or rebuild the sitemap to publish.',
+      $count,
+    ));
+    return self::EXIT_SUCCESS;
   }
 
 }

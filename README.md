@@ -110,6 +110,12 @@ Then visit **LLM Content Settings** and expand the "XML Sitemap Integration" fie
 
 When you enable integration, all existing node markdown URLs and index endpoints are bulk-synced into the sitemap. After that, links are kept in sync automatically as nodes are created, updated, unpublished, or deleted.
 
+### Manual sync
+
+If you enable `xmlsitemap_integration: true` via imported config (rather than the settings form), run `drush llm:sitemap-sync` to backfill the xmlsitemap link table. The same sync also runs automatically from `hook_install()` and update hook `11002`, so most deploys should not need the manual command.
+
+After deploying a version that adds new drush commands, run `drush cache:rebuild` so Drush discovers the new command signature.
+
 ### Disabling the Built-in Sitemap
 
 If you prefer to use xmlsitemap exclusively, check "Disable built-in /sitemap-llm.xml" in the "Built-in Sitemap" fieldset. This returns a 403 for `/sitemap-llm.xml`. The setting takes effect after a cache rebuild.

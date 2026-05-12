@@ -7,7 +7,6 @@ namespace Drupal\llm_content\Controller;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Cache\CacheableResponse;
 use Drupal\Core\Controller\ControllerBase;
-use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Url;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -19,7 +18,6 @@ final class LlmsTxtController extends ControllerBase {
 
   public function __construct(
     protected MarkdownConverterInterface $markdownConverter,
-    protected LanguageManagerInterface $languageManager,
   ) {}
 
   /**
@@ -28,7 +26,6 @@ final class LlmsTxtController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get(MarkdownConverterInterface::class),
-      $container->get('language_manager'),
     );
   }
 
@@ -59,13 +56,16 @@ final class LlmsTxtController extends ControllerBase {
 
       if (!empty($nids)) {
         $output .= "## Content\n\n";
-        $langcode = $this->languageManager->getCurrentLanguage()->getId();
+        $langcode = $this->languageManager()->getCurrentLanguage()->getId();
         foreach (array_chunk($nids, 50) as $batch) {
           $nodes = $nodeStorage->loadMultiple($batch);
           // Pre-fetch all stored markdown for this batch in one query.
           $batchMarkdown = $this->markdownConverter->getStoredMarkdownBatch($batch, $langcode);
           foreach ($nodes as $node) {
-            $title = $node->label() ?? 'Untitled';
+            // Sanitize title for markdown link safety: strip HTML and escape
+            // characters that could break markdown link syntax.
+            $title = strip_tags($node->label() ?? 'Untitled');
+            $title = str_replace(['[', ']'], ['(', ')'], $title);
             $url = Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()])->toString();
             $description = '';
             if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
@@ -102,7 +102,7 @@ final class LlmsTxtController extends ControllerBase {
 
     $cacheMetadata = new CacheableMetadata();
     $cacheMetadata->addCacheTags(['llm_content:list', 'node_list', 'path_alias_list']);
-    $cacheMetadata->addCacheContexts(['user.permissions']);
+    $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
     $response->addCacheableDependency($siteConfig);
@@ -124,7 +124,7 @@ final class LlmsTxtController extends ControllerBase {
 
     $cacheMetadata = new CacheableMetadata();
     $cacheMetadata->addCacheTags(['llm_content:list', 'node_list']);
-    $cacheMetadata->addCacheContexts(['user.permissions']);
+    $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
 

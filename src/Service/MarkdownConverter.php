@@ -99,13 +99,16 @@ final class MarkdownConverter implements MarkdownConverterInterface {
 
     // Build frontmatter.
     $alias = $this->aliasManager->getAliasByPath('/node/' . $node->id());
-    $title = $node->label() ?? '';
+    $title = strip_tags($node->label() ?? '');
     // Sanitize title for YAML safety: escape quotes, strip control characters.
     $title = preg_replace('/[\x00-\x1f\x7f]/', '', $title) ?? $title;
     $title = str_replace(['\\', '"'], ['\\\\', '\\"'], $title);
+    // Sanitize alias for YAML safety: strip control chars and quote.
+    $alias = preg_replace('/[\x00-\x1f\x7f]/', '', $alias) ?? $alias;
+    $alias = str_replace(['\\', '"'], ['\\\\', '\\"'], $alias);
     $frontmatter = "---\n";
     $frontmatter .= 'title: "' . $title . "\"\n";
-    $frontmatter .= 'url: ' . $alias . "\n";
+    $frontmatter .= 'url: "' . $alias . "\"\n";
     $frontmatter .= 'type: ' . $node->bundle() . "\n";
     $frontmatter .= 'date: ' . $this->dateFormatter->format($node->getCreatedTime(), 'custom', 'Y-m-d') . "\n";
     if ($node->getRevisionCreationTime()) {
@@ -113,7 +116,14 @@ final class MarkdownConverter implements MarkdownConverterInterface {
     }
     $frontmatter .= "---\n\n";
 
-    $fullMarkdown = $frontmatter . '# ' . ($node->label() ?? '') . "\n\n" . trim($markdown);
+    // Sanitize the title for the H1 heading: strip HTML, control chars,
+    // and brackets that could be used to inject markdown links (e.g. a
+    // node title of `[text](javascript:alert(1))` would otherwise land
+    // verbatim in the heading and execute when rendered back to HTML).
+    $headingTitle = strip_tags($node->label() ?? '');
+    $headingTitle = preg_replace('/[\x00-\x1f\x7f]/', '', $headingTitle) ?? $headingTitle;
+    $headingTitle = str_replace(['[', ']'], ['(', ')'], $headingTitle);
+    $fullMarkdown = $frontmatter . '# ' . $headingTitle . "\n\n" . trim($markdown);
 
     // Store in database.
     $this->database->merge('llm_content_markdown')
@@ -330,18 +340,31 @@ final class MarkdownConverter implements MarkdownConverterInterface {
       return $output;
     }
 
-    // Join with node_field_data for access control and type filtering.
-    $query = $this->database->select('llm_content_markdown', 'm');
-    $query->innerJoin('node_field_data', 'n', 'm.nid = n.nid AND m.langcode = n.langcode');
-    $query->fields('m', ['markdown']);
-    $query->condition('n.status', 1);
-    $query->condition('n.type', $enabledTypes, 'IN');
-    $query->orderBy('m.nid', 'ASC');
-    $query->range(0, 500);
-    $results = $query->execute()->fetchCol();
+    // Use entity query with access check to enforce node access restrictions.
+    $nodeStorage = $this->entityTypeManager->getStorage('node');
+    $nids = $nodeStorage->getQuery()
+      ->condition('status', 1)
+      ->condition('type', $enabledTypes, 'IN')
+      ->accessCheck(TRUE)
+      ->sort('nid', 'ASC')
+      ->execute();
 
-    foreach ($results as $markdown) {
-      $output .= $markdown . "\n\n---\n\n";
+    if (!empty($nids)) {
+      // Fetch stored markdown for the access-checked nids. Join on
+      // node_field_data with default_langcode = 1 so multilingual nodes
+      // only contribute their canonical translation — without this we
+      // would emit one copy per language stored in llm_content_markdown.
+      $query = $this->database->select('llm_content_markdown', 'm');
+      $query->innerJoin('node_field_data', 'n', 'n.nid = m.nid AND n.langcode = m.langcode');
+      $query->fields('m', ['markdown']);
+      $query->condition('m.nid', $nids, 'IN');
+      $query->condition('n.default_langcode', 1);
+      $query->orderBy('m.nid', 'ASC');
+      $results = $query->execute()->fetchCol();
+
+      foreach ($results as $markdown) {
+        $output .= $markdown . "\n\n---\n\n";
+      }
     }
 
     return $output;

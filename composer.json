@@ -17,7 +17,11 @@
       "drupal/core-composer-scaffold": true,
       "composer/installers": true,
       "drupal/core-project-message": true,
-      "php-http/discovery": true
+      "php-http/discovery": true,
+      "cweagans/composer-patches": true,
+      "tbachert/spi": true,
+      "symfony/runtime": true,
+      "symfony/flex": true
     }
   },
   "scripts": {

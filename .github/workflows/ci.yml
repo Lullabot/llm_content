@@ -21,7 +21,10 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      - uses: ramsey/composer-install@v3
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist --no-progress
+        env:
+          COMPOSER_NO_AUDIT: 1
 
       - name: PHPCS
         run: vendor/bin/phpcs
@@ -64,7 +67,10 @@ jobs:
             drupal/core-dev:${{ matrix.drupal }} \
             --with-all-dependencies --no-update
 
-      - uses: ramsey/composer-install@v3
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist --no-progress
+        env:
+          COMPOSER_NO_AUDIT: 1
 
       - name: Migrate PHPUnit configuration
         run: php vendor/bin/phpunit --migrate-configuration || true

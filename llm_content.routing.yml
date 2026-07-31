@@ -3,6 +3,12 @@ llm_content.markdown_view:
   defaults:
     _controller: '\Drupal\llm_content\Controller\LlmMarkdownController::view'
     _title: 'Markdown View'
+  # Restrict to cacheable methods. Drupal's page_cache and
+  # dynamic_page_cache both refuse to serve non-cacheable methods, so
+  # without this an anonymous POST re-executes the controller on every
+  # request — and this one can write to llm_content_markdown via
+  # getMarkdown()'s generate-on-demand path.
+  methods: [GET, HEAD]
   requirements:
     _entity_access: 'node.view'
     node: '\d+'
@@ -15,6 +21,7 @@ llm_content.sitemap_llm:
   path: '/sitemap-llm.xml'
   defaults:
     _controller: '\Drupal\llm_content\Controller\LlmSitemapController::generate'
+  methods: [GET, HEAD]
   requirements:
     _permission: 'access content'
 
@@ -22,6 +29,7 @@ llm_content.llms_txt:
   path: '/llms.txt'
   defaults:
     _controller: '\Drupal\llm_content\Controller\LlmsTxtController::llmsTxt'
+  methods: [GET, HEAD]
   requirements:
     _permission: 'access content'
 
@@ -29,6 +37,7 @@ llm_content.llms_full_txt:
   path: '/llms-full.txt'
   defaults:
     _controller: '\Drupal\llm_content\Controller\LlmsTxtController::llmsFullTxt'
+  methods: [GET, HEAD]
   requirements:
     _permission: 'access content'
 

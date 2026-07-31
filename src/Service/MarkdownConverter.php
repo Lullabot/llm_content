@@ -11,6 +11,8 @@ use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Render\RendererInterface;
+use Drupal\Core\Session\AccountSwitcherInterface;
+use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\node\NodeInterface;
 use Drupal\path_alias\AliasManagerInterface;
 use League\HTMLToMarkdown\HtmlConverter;
@@ -39,6 +41,7 @@ final class MarkdownConverter implements MarkdownConverterInterface {
     protected Connection $database,
     protected DateFormatterInterface $dateFormatter,
     protected TimeInterface $time,
+    protected AccountSwitcherInterface $accountSwitcher,
     LoggerChannelFactoryInterface $loggerFactory,
   ) {
     $this->logger = $loggerFactory->get('llm_content');
@@ -56,7 +59,18 @@ final class MarkdownConverter implements MarkdownConverterInterface {
     $config = $this->configFactory->get('llm_content.settings');
     $viewMode = $config->get('view_mode') ?? 'full';
 
-    // Render the node to HTML.
+    // Render the node to HTML as the anonymous user.
+    //
+    // The result is stored keyed only on (nid, langcode) — there is no
+    // privilege dimension — and is then served to anonymous visitors via
+    // /llms-full.txt. Rendering in the *caller's* context therefore
+    // freezes whatever that user could see into public output: core's
+    // entity-reference formatter access-checks against the current user,
+    // so an editor saving an article with an unpublished bio reference
+    // would bake that bio's title and URL into the public corpus. Switch
+    // to anonymous so the stored blob can never exceed what an anonymous
+    // visitor is entitled to.
+    $this->accountSwitcher->switchTo(new AnonymousUserSession());
     try {
       $viewBuilder = $this->entityTypeManager->getViewBuilder('node');
       $build = $viewBuilder->view($node, $viewMode);
@@ -69,6 +83,9 @@ final class MarkdownConverter implements MarkdownConverterInterface {
         'exception' => $e,
       ]);
       return '';
+    }
+    finally {
+      $this->accountSwitcher->switchBack();
     }
 
     // Strip comment sections and Drupal chrome using DOM for reliability.

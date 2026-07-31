@@ -19,6 +19,8 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\Query\QueryInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Render\RendererInterface;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\llm_content\Service\MarkdownConverter;
 use Drupal\node\NodeInterface;
 use Drupal\path_alias\AliasManagerInterface;
@@ -50,6 +52,7 @@ class MarkdownConverterSecurityTest extends TestCase {
     string $renderedHtml = '<p>Body content.</p>',
     string $label = 'Test',
     string $alias = '/test',
+    ?AccountSwitcherInterface $accountSwitcher = NULL,
   ): array {
     $reflection = new \ReflectionClass(MarkdownConverter::class);
     $converter = $reflection->newInstanceWithoutConstructor();
@@ -62,6 +65,12 @@ class MarkdownConverterSecurityTest extends TestCase {
     ]);
     $this->setProp($reflection, $converter, 'htmlConverter', $htmlConverter);
     $this->setProp($reflection, $converter, 'logger', $this->createMock(LoggerInterface::class));
+    $this->setProp(
+      $reflection,
+      $converter,
+      'accountSwitcher',
+      $accountSwitcher ?? $this->createMock(AccountSwitcherInterface::class),
+    );
 
     // configFactory: convert() reads view_mode from llm_content.settings.
     $settings = $this->createMock(ImmutableConfig::class);
@@ -127,6 +136,114 @@ class MarkdownConverterSecurityTest extends TestCase {
     $prop = $reflection->getProperty($name);
     $prop->setAccessible(TRUE);
     $prop->setValue($obj, $value);
+  }
+
+  /**
+   * The node must be rendered as anonymous, not as the triggering user.
+   *
+   * The stored blob is keyed only on (nid, langcode) — it carries no
+   * privilege dimension — and /llms-full.txt serves it to anonymous
+   * visitors. Core's entity-reference formatter access-checks against
+   * the *current* user, so rendering in an editor's context bakes that
+   * editor's view of the node (including titles and aliases of
+   * unpublished referenced entities) permanently into public output.
+   *
+   * @covers ::convert
+   */
+  public function testConvertRendersAsAnonymousUser(): void {
+    $calls = [];
+    $switcher = NULL;
+    $switcher = $this->createMock(AccountSwitcherInterface::class);
+    $switcher->expects($this->once())
+      ->method('switchTo')
+      ->willReturnCallback(function (AccountInterface $account) use (&$calls, &$switcher) {
+        $calls[] = $account->isAnonymous() ? 'switchTo:anonymous' : 'switchTo:uid' . $account->id();
+        return $switcher;
+      });
+    $switcher->expects($this->once())
+      ->method('switchBack')
+      ->willReturnCallback(function () use (&$calls, &$switcher) {
+        $calls[] = 'switchBack';
+        return $switcher;
+      });
+
+    [$converter, $node] = $this->buildConverterForConvert(accountSwitcher: $switcher);
+    $this->logRenderCall($converter, $calls);
+
+    $converter->convert($node);
+
+    // Order matters: the switch has to wrap the render, not follow it.
+    $this->assertSame(['switchTo:anonymous', 'render', 'switchBack'], $calls);
+  }
+
+  /**
+   * The account handed to switchTo() must actually be anonymous.
+   *
+   * @covers ::convert
+   */
+  public function testConvertSwitchesToUidZero(): void {
+    $captured = NULL;
+    $switcher = NULL;
+    $switcher = $this->createMock(AccountSwitcherInterface::class);
+    $switcher->method('switchTo')
+      ->willReturnCallback(function (AccountInterface $account) use (&$captured, &$switcher) {
+        $captured = $account;
+        return $switcher;
+      });
+
+    [$converter, $node] = $this->buildConverterForConvert(accountSwitcher: $switcher);
+
+    $converter->convert($node);
+
+    $this->assertInstanceOf(AccountInterface::class, $captured);
+    $this->assertTrue($captured->isAnonymous());
+    $this->assertSame(0, (int) $captured->id());
+  }
+
+  /**
+   * A failed render must still restore the original account.
+   *
+   * Without the finally block, a render exception would leave the
+   * anonymous session in place for the rest of the request — the
+   * saving user would silently continue as anonymous.
+   *
+   * @covers ::convert
+   */
+  public function testConvertSwitchesBackWhenRenderFails(): void {
+    $switcher = $this->createMock(AccountSwitcherInterface::class);
+    $switcher->expects($this->once())->method('switchTo');
+    $switcher->expects($this->once())->method('switchBack');
+
+    [$converter, $node] = $this->buildConverterForConvert(accountSwitcher: $switcher);
+
+    $reflection = new \ReflectionClass(MarkdownConverter::class);
+    $renderer = $this->createMock(RendererInterface::class);
+    $renderer->method('renderInIsolation')
+      ->willThrowException(new \RuntimeException('render blew up'));
+    $this->setProp($reflection, $converter, 'renderer', $renderer);
+
+    // convert() swallows the failure and returns an empty string.
+    $this->assertSame('', $converter->convert($node));
+  }
+
+  /**
+   * Replaces the converter's renderer with one that records its call.
+   *
+   * @param \Drupal\llm_content\Service\MarkdownConverter $converter
+   *   The converter to instrument.
+   * @param array<int, string> $calls
+   *   The call log to append to, by reference.
+   */
+  protected function logRenderCall(MarkdownConverter $converter, array &$calls): void {
+    $reflection = new \ReflectionClass(MarkdownConverter::class);
+    $renderer = $this->createMock(RendererInterface::class);
+    $renderer->method('renderInIsolation')->willReturnCallback(
+      function () use (&$calls): string {
+        $calls[] = 'render';
+        return '<p>Body content.</p>';
+      },
+    );
+    $this->setProp($reflection, $converter, 'renderer', $renderer);
   }
 
   /**

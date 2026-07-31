@@ -10,14 +10,19 @@ use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Url;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Controller for llms.txt and llms-full.txt endpoints.
  */
 final class LlmsTxtController extends ControllerBase {
 
+  use CanonicalUrlTrait;
+
   public function __construct(
     protected MarkdownConverterInterface $markdownConverter,
+    protected RequestStack $requestStack,
   ) {}
 
   /**
@@ -26,13 +31,19 @@ final class LlmsTxtController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get(MarkdownConverterInterface::class),
+      $container->get('request_stack'),
     );
   }
 
   /**
    * Generates the llms.txt file.
    */
-  public function llmsTxt(): CacheableResponse {
+  public function llmsTxt(): Response {
+    $request = $this->requestStack->getCurrentRequest();
+    if ($request !== NULL && ($redirect = $this->redirectToCanonicalUrl($request)) !== NULL) {
+      return $redirect;
+    }
+
     $config = $this->config('llm_content.settings');
     $enabledTypes = $config->get('enabled_content_types') ?? [];
     $siteConfig = $this->config('system.site');
@@ -106,6 +117,7 @@ final class LlmsTxtController extends ControllerBase {
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
     $response->addCacheableDependency($siteConfig);
+    $this->varyOnQueryArgs($response);
 
     return $response;
   }
@@ -113,7 +125,12 @@ final class LlmsTxtController extends ControllerBase {
   /**
    * Generates the llms-full.txt content dynamically.
    */
-  public function llmsFullTxt(): CacheableResponse {
+  public function llmsFullTxt(): Response {
+    $request = $this->requestStack->getCurrentRequest();
+    if ($request !== NULL && ($redirect = $this->redirectToCanonicalUrl($request)) !== NULL) {
+      return $redirect;
+    }
+
     $config = $this->config('llm_content.settings');
     $content = $this->markdownConverter->generateFullText();
 
@@ -127,6 +144,7 @@ final class LlmsTxtController extends ControllerBase {
     $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
+    $this->varyOnQueryArgs($response);
 
     return $response;
   }

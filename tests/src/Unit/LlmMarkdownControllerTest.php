@@ -9,11 +9,11 @@ use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
-use Drupal\Core\Routing\LocalRedirectResponse;
 use Drupal\llm_content\Controller\LlmMarkdownController;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Drupal\node\NodeInterface;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -174,9 +174,30 @@ class LlmMarkdownControllerTest extends TestCase {
 
     $response = $controller->view($node);
 
-    $this->assertInstanceOf(LocalRedirectResponse::class, $response);
     $this->assertSame(301, $response->getStatusCode());
-    $this->assertSame('/node/1/llm-md', $response->getTargetUrl());
+    $this->assertSame('/node/1/llm-md', $response->headers->get('Location'));
+  }
+
+  /**
+   * The redirect must not be overridable by a `destination` parameter.
+   *
+   * Core's RedirectResponseSubscriber rewrites the target of any
+   * RedirectResponse it sees when the request carries `?destination=`.
+   * Returning one here would make every endpoint a permanent, publicly
+   * cached redirect to an arbitrary internal path.
+   *
+   * @covers ::view
+   */
+  public function testCanonicalRedirectIgnoresDestinationParameter(): void {
+    $controller = new LlmMarkdownController(
+      $this->markdownConverter,
+      $this->requestStack('/node/1/llm-md?destination=/user/logout'),
+    );
+
+    $response = $controller->view($this->createMockNode());
+
+    $this->assertNotInstanceOf(RedirectResponse::class, $response);
+    $this->assertSame('/node/1/llm-md', $response->headers->get('Location'));
   }
 
   /**

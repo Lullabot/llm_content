@@ -9,10 +9,13 @@ use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\Routing\LocalRedirectResponse;
 use Drupal\llm_content\Controller\LlmMarkdownController;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Drupal\node\NodeInterface;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Tests the LLM Markdown controller.
@@ -66,7 +69,23 @@ class LlmMarkdownControllerTest extends TestCase {
     $container->set('cache_contexts_manager', $cacheContextsManager);
     \Drupal::setContainer($container);
 
-    $this->controller = new LlmMarkdownController($this->markdownConverter);
+    $this->controller = new LlmMarkdownController(
+      $this->markdownConverter,
+      $this->requestStack(),
+    );
+  }
+
+  /**
+   * Builds a request stack holding a single GET request.
+   *
+   * @param string $uri
+   *   The request URI, including any query string.
+   */
+  protected function requestStack(string $uri = '/node/1/llm-md'): RequestStack {
+    $stack = new RequestStack();
+    $stack->push(Request::create($uri));
+
+    return $stack;
   }
 
   /**
@@ -134,6 +153,51 @@ class LlmMarkdownControllerTest extends TestCase {
     $this->assertSame(200, $response->getStatusCode());
     $this->assertSame('# Test', $response->getContent());
     $this->assertSame('text/markdown; charset=utf-8', $response->headers->get('Content-Type'));
+  }
+
+  /**
+   * A query string must produce a redirect instead of a rendered body.
+   *
+   * Otherwise every distinct `?x=N` caches its own copy of the markdown.
+   *
+   * @covers ::view
+   */
+  public function testQueryStringRedirectsToCanonicalUrl(): void {
+    $controller = new LlmMarkdownController(
+      $this->markdownConverter,
+      $this->requestStack('/node/1/llm-md?x=7'),
+    );
+    $node = $this->createMockNode();
+
+    // The expensive path must not run at all.
+    $this->markdownConverter->expects($this->never())->method('getMarkdown');
+
+    $response = $controller->view($node);
+
+    $this->assertInstanceOf(LocalRedirectResponse::class, $response);
+    $this->assertSame(301, $response->getStatusCode());
+    $this->assertSame('/node/1/llm-md', $response->getTargetUrl());
+  }
+
+  /**
+   * The 200 response must vary on query args.
+   *
+   * Without this context, dynamic_page_cache answers `?x=1` from the
+   * cached query-string-free response, the controller never runs, and
+   * the redirect above never gets a chance to fire.
+   *
+   * @covers ::view
+   */
+  public function testResponseVariesOnQueryArgs(): void {
+    $node = $this->createMockNode();
+    $this->markdownConverter->method('getMarkdown')->willReturn('# Test');
+
+    $response = $this->controller->view($node);
+
+    $this->assertContains(
+      'url.query_args',
+      $response->getCacheableMetadata()->getCacheContexts(),
+    );
   }
 
 }

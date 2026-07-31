@@ -10,14 +10,19 @@ use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Url;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Controller for the LLM sitemap XML endpoint.
  */
 final class LlmSitemapController extends ControllerBase {
 
+  use CanonicalUrlTrait;
+
   public function __construct(
     protected Connection $database,
+    protected RequestStack $requestStack,
   ) {}
 
   /**
@@ -26,13 +31,19 @@ final class LlmSitemapController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('database'),
+      $container->get('request_stack'),
     );
   }
 
   /**
    * Generates the LLM sitemap XML.
    */
-  public function generate(): CacheableResponse {
+  public function generate(): Response {
+    $request = $this->requestStack->getCurrentRequest();
+    if ($request !== NULL && ($redirect = $this->redirectToCanonicalUrl($request)) !== NULL) {
+      return $redirect;
+    }
+
     $config = $this->config('llm_content.settings');
     $enabledTypes = $config->get('enabled_content_types') ?? [];
     // Use Drupal's URL generator for safe base URL resolution.
@@ -112,6 +123,7 @@ final class LlmSitemapController extends ControllerBase {
     $cacheMetadata->addCacheContexts(['user.permissions', 'user.node_grants:view']);
     $response->addCacheableDependency($cacheMetadata);
     $response->addCacheableDependency($config);
+    $this->varyOnQueryArgs($response);
 
     return $response;
   }

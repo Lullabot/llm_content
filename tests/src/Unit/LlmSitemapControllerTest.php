@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Drupal\Tests\llm_content\Unit;
 
 use Drupal\Core\Database\Connection;
-use Drupal\Core\Routing\LocalRedirectResponse;
 use Drupal\llm_content\Controller\LlmSitemapController;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -39,9 +39,11 @@ class LlmSitemapControllerTest extends TestCase {
 
     $response = $controller->generate();
 
-    $this->assertInstanceOf(LocalRedirectResponse::class, $response);
     $this->assertSame(301, $response->getStatusCode());
-    $this->assertSame('/sitemap-llm.xml', $response->getTargetUrl());
+    $this->assertSame('/sitemap-llm.xml', $response->headers->get('Location'));
+    // Not a RedirectResponse: core's RedirectResponseSubscriber would
+    // let `?destination=` rewrite the target of one.
+    $this->assertNotInstanceOf(RedirectResponse::class, $response);
   }
 
 }

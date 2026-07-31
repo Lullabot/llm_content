@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Drupal\llm_content\Controller;
 
 use Drupal\Core\Cache\CacheableMetadata;
+use Drupal\Core\Cache\CacheableResponse;
 use Drupal\Core\Cache\CacheableResponseInterface;
-use Drupal\Core\Routing\LocalRedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -37,10 +37,23 @@ trait CanonicalUrlTrait {
       return NULL;
     }
 
-    // A root-relative path is never external, so LocalRedirectResponse
-    // accepts it without consulting the request context.
     $target = $request->getBaseUrl() . $request->getPathInfo();
-    $response = new LocalRedirectResponse($target, Response::HTTP_MOVED_PERMANENTLY);
+    // Strip anything that could break out of the Location header. The
+    // path already matched one of this module's routes, so this only
+    // guards against surprises in path processing.
+    $target = preg_replace('/[\x00-\x1f\x7f]/', '', $target) ?? '/';
+
+    // Deliberately NOT a RedirectResponse. Core's
+    // RedirectResponseSubscriber lets a `?destination=` query parameter
+    // overwrite the target of any RedirectResponse it sees — including
+    // the SecuredRedirectResponse subclasses — so returning one here
+    // would turn every endpoint into `/llms.txt?destination=/anywhere`,
+    // a permanent, publicly cached redirect to an arbitrary internal
+    // path. A plain response carrying a Location header is not matched
+    // by that subscriber and redirects exactly where we say.
+    $response = new CacheableResponse('', Response::HTTP_MOVED_PERMANENTLY, [
+      'Location' => $target,
+    ]);
     $this->varyOnQueryArgs($response);
 
     return $response;

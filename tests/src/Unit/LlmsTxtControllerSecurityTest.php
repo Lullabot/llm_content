@@ -9,10 +9,10 @@ use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
-use Drupal\Core\Routing\LocalRedirectResponse;
 use Drupal\llm_content\Controller\LlmsTxtController;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -160,9 +160,30 @@ class LlmsTxtControllerSecurityTest extends TestCase {
 
     $response = $controller->llmsFullTxt();
 
-    $this->assertInstanceOf(LocalRedirectResponse::class, $response);
     $this->assertSame(301, $response->getStatusCode());
-    $this->assertSame('/llms-full.txt', $response->getTargetUrl());
+    $this->assertSame('/llms-full.txt', $response->headers->get('Location'));
+  }
+
+  /**
+   * A `destination` parameter must not be able to move the redirect.
+   *
+   * Core's RedirectResponseSubscriber rewrites the target of every
+   * RedirectResponse when the request carries `?destination=`, so
+   * emitting one here would turn a public endpoint into a permanent,
+   * publicly cached redirect to any internal path an attacker picks.
+   *
+   * @covers ::llmsFullTxt
+   */
+  public function testCanonicalRedirectIgnoresDestinationParameter(): void {
+    $controller = new LlmsTxtController(
+      $this->markdownConverter,
+      $this->requestStack('/llms-full.txt?destination=/user/logout'),
+    );
+
+    $response = $controller->llmsFullTxt();
+
+    $this->assertNotInstanceOf(RedirectResponse::class, $response);
+    $this->assertSame('/llms-full.txt', $response->headers->get('Location'));
   }
 
   /**
@@ -178,9 +199,8 @@ class LlmsTxtControllerSecurityTest extends TestCase {
 
     $response = $controller->llmsTxt();
 
-    $this->assertInstanceOf(LocalRedirectResponse::class, $response);
     $this->assertSame(301, $response->getStatusCode());
-    $this->assertSame('/llms.txt', $response->getTargetUrl());
+    $this->assertSame('/llms.txt', $response->headers->get('Location'));
   }
 
   /**

@@ -158,11 +158,18 @@ If you prefer to use xmlsitemap exclusively, check "Disable built-in /sitemap-ll
 
 ### Upgrading
 
-Update `11003` clears `llm_content_markdown` and requeues every published
-node of an enabled type. Rows written before that update were rendered in
-the request context of whoever saved the node, so they may contain
-content the public cannot see. Until the queue drains — 100 items per
-cron run — `/llms.txt` and `/llms-full.txt` are incomplete; run
+Update `11003` clears `llm_content_markdown` and queues every purged row
+for regeneration. Rows written before that update were rendered in the
+request context of whoever saved the node, so they may contain content
+the public cannot see.
+
+The update runs as a batch, purging and queueing in chunks so it cannot
+half-finish on a large site, and it works from the stored rows rather
+than from a node query so translations are requeued rather than merely
+destroyed.
+
+Until the queue drains, `/llms.txt` and `/llms-full.txt` are incomplete.
+Cron drains it for up to 60 seconds per run; run
 `drush queue:run llm_content_markdown_generation` to finish immediately.
 
 ## Permissions

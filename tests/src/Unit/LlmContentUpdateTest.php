@@ -5,17 +5,14 @@ declare(strict_types=1);
 namespace Drupal\Tests\llm_content\Unit;
 
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
-use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
-use Drupal\Core\Database\Query\Truncate;
+use Drupal\Core\Database\Query\Delete;
+use Drupal\Core\Database\Query\SelectInterface;
+use Drupal\Core\Database\StatementInterface;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Queue\QueueInterface;
-use Drupal\llm_content\Service\MarkdownConverterInterface;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\LoggerInterface;
 
 /**
  * Tests the update hook that purges privilege-tainted stored markdown.
@@ -31,18 +28,18 @@ use Psr\Log\LoggerInterface;
 class LlmContentUpdateTest extends TestCase {
 
   /**
-   * Queue items created during the update.
+   * Stand-in for the llm_content_markdown table.
    *
-   * @var array<int, array<string, mixed>>
+   * @var array<int, array{nid: int, langcode: string}>
    */
-  protected array $queued = [];
+  protected array $table = [];
 
   /**
-   * Table names passed to Connection::truncate().
+   * Queue items created during the update.
    *
-   * @var array<int, string>
+   * @var array<int, mixed>
    */
-  protected array $truncated = [];
+  protected array $queued = [];
 
   /**
    * Cache tags invalidated during the update.
@@ -57,38 +54,23 @@ class LlmContentUpdateTest extends TestCase {
   protected function setUp(): void {
     parent::setUp();
     require_once dirname(__DIR__, 3) . '/llm_content.install';
+    $this->table = [];
+    $this->queued = [];
+    $this->invalidated = [];
   }
 
   /**
-   * Builds a container wired for llm_content_update_11003().
+   * Wires a container backed by an in-memory stand-in for the table.
    *
-   * @param string[] $enabledTypes
-   *   The configured enabled content types.
-   * @param int[] $missingNids
-   *   The nids the converter reports as lacking stored markdown, which
-   *   after a truncate is every published node of an enabled type.
+   * @param array<int, array{nid: int, langcode: string}> $rows
+   *   The rows the table starts with.
    */
-  protected function setUpContainer(array $enabledTypes, array $missingNids): void {
-    $truncate = $this->createMock(Truncate::class);
-    $truncate->method('execute')->willReturn(0);
+  protected function setUpContainer(array $rows): void {
+    $this->table = $rows;
 
     $database = $this->createMock(Connection::class);
-    $database->method('truncate')->willReturnCallback(
-      function (string $table) use ($truncate): Truncate {
-        $this->truncated[] = $table;
-        return $truncate;
-      },
-    );
-
-    $settings = $this->createMock(ImmutableConfig::class);
-    $settings->method('get')->willReturnCallback(
-      static fn (string $key) => $key === 'enabled_content_types' ? $enabledTypes : NULL,
-    );
-    $configFactory = $this->createMock(ConfigFactoryInterface::class);
-    $configFactory->method('get')->willReturn($settings);
-
-    $converter = $this->createMock(MarkdownConverterInterface::class);
-    $converter->method('getNidsMissingMarkdown')->willReturn($missingNids);
+    $database->method('select')->willReturn($this->buildSelect());
+    $database->method('delete')->willReturnCallback(fn (): Delete => $this->buildDelete());
 
     $queue = $this->createMock(QueueInterface::class);
     $queue->method('createItem')->willReturnCallback(
@@ -100,9 +82,6 @@ class LlmContentUpdateTest extends TestCase {
     $queueFactory = $this->createMock(QueueFactory::class);
     $queueFactory->method('get')->willReturn($queue);
 
-    $loggerFactory = $this->createMock(LoggerChannelFactoryInterface::class);
-    $loggerFactory->method('get')->willReturn($this->createMock(LoggerInterface::class));
-
     $invalidator = $this->createMock(CacheTagsInvalidatorInterface::class);
     $invalidator->method('invalidateTags')->willReturnCallback(
       function (array $tags): void {
@@ -112,75 +91,244 @@ class LlmContentUpdateTest extends TestCase {
 
     $container = new ContainerBuilder();
     $container->set('database', $database);
-    $container->set('config.factory', $configFactory);
-    $container->set(MarkdownConverterInterface::class, $converter);
     $container->set('queue', $queueFactory);
-    $container->set('logger.factory', $loggerFactory);
     $container->set('cache_tags.invalidator', $invalidator);
     \Drupal::setContainer($container);
   }
 
   /**
-   * The update must drop every stored row, not just refresh them.
+   * Builds a select mock answering both the count and the row query.
    */
-  public function testUpdatePurgesStoredMarkdown(): void {
-    $this->setUpContainer(['article'], [10, 20]);
+  protected function buildSelect(): SelectInterface {
+    $countStatement = $this->createMock(StatementInterface::class);
+    $countStatement->method('fetchField')->willReturnCallback(
+      fn (): int => count($this->table),
+    );
+    $countSelect = $this->createMock(SelectInterface::class);
+    $countSelect->method('execute')->willReturn($countStatement);
 
-    llm_content_update_11003();
+    $rowStatement = $this->createMock(StatementInterface::class);
+    $rowStatement->method('fetchAll')->willReturnCallback(
+      function (): array {
+        $rows = array_slice($this->table, 0, 100);
+        return array_map(
+          static fn (array $row): object => (object) $row,
+          $rows,
+        );
+      },
+    );
 
-    $this->assertSame(['llm_content_markdown'], $this->truncated);
+    $select = $this->createMock(SelectInterface::class);
+    $select->method('fields')->willReturnSelf();
+    $select->method('orderBy')->willReturnSelf();
+    $select->method('range')->willReturnSelf();
+    $select->method('countQuery')->willReturn($countSelect);
+    $select->method('execute')->willReturn($rowStatement);
+
+    return $select;
   }
 
   /**
-   * Every node reported as missing must be queued for regeneration.
+   * Builds a delete mock that removes the matching row from the table.
    */
-  public function testUpdateQueuesRegeneration(): void {
-    $this->setUpContainer(['article', 'page'], [10, 20, 30]);
+  protected function buildDelete(): Delete {
+    $conditions = [];
+    $delete = $this->createMock(Delete::class);
+    $delete->method('condition')->willReturnCallback(
+      function (string $field, mixed $value) use (&$conditions, &$delete): Delete {
+        $conditions[$field] = $value;
+        return $delete;
+      },
+    );
+    $delete->method('execute')->willReturnCallback(
+      function () use (&$conditions): int {
+        $before = count($this->table);
+        $this->table = array_values(array_filter(
+          $this->table,
+          static fn (array $row) => (int) $row['nid'] !== (int) ($conditions['nid'] ?? -1)
+            || $row['langcode'] !== ($conditions['langcode'] ?? NULL),
+        ));
+        return $before - count($this->table);
+      },
+    );
 
-    llm_content_update_11003();
+    return $delete;
+  }
+
+  /**
+   * Runs the update to completion, returning the final message.
+   *
+   * @param int $maxPasses
+   *   Safety valve so a non-converging hook fails the test instead of
+   *   looping forever.
+   *
+   * @return array{string, int}
+   *   The last returned message and the number of passes taken.
+   */
+  protected function runUpdate(int $maxPasses = 50): array {
+    $sandbox = [];
+    $message = '';
+    $passes = 0;
+    do {
+      $message = llm_content_update_11003($sandbox);
+      $passes++;
+      $this->assertLessThanOrEqual($maxPasses, $passes, 'Update did not converge.');
+    } while (($sandbox['#finished'] ?? 0) < 1);
+
+    return [$message, $passes];
+  }
+
+  /**
+   * Builds a table of $count rows in the given language.
+   *
+   * @return array<int, array{nid: int, langcode: string}>
+   *   The generated rows.
+   */
+  protected function rows(int $count, string $langcode = 'en', int $offset = 0): array {
+    $rows = [];
+    for ($i = 1; $i <= $count; $i++) {
+      $rows[] = ['nid' => $offset + $i, 'langcode' => $langcode];
+    }
+    return $rows;
+  }
+
+  /**
+   * Every stored row must be gone once the update finishes.
+   */
+  public function testUpdatePurgesEveryStoredRow(): void {
+    $this->setUpContainer($this->rows(3));
+
+    $this->runUpdate();
+
+    $this->assertSame([], $this->table);
+  }
+
+  /**
+   * Every purged row must be queued for regeneration.
+   */
+  public function testUpdateQueuesEveryPurgedRow(): void {
+    $this->setUpContainer($this->rows(3));
+
+    $this->runUpdate();
 
     $this->assertSame(
-      [['nid' => 10], ['nid' => 20], ['nid' => 30]],
+      [
+        ['nid' => 1, 'langcode' => 'en'],
+        ['nid' => 2, 'langcode' => 'en'],
+        ['nid' => 3, 'langcode' => 'en'],
+      ],
       $this->queued,
     );
   }
 
   /**
-   * Cached llms.txt and llms-full.txt output must be invalidated.
+   * Translation rows must be requeued, not just destroyed.
    *
-   * The purge leaves both endpoints empty until the queue drains; the
-   * previously cached — and possibly tainted — bodies must not keep
-   * being served in the meantime.
+   * Requeueing from a node query would return default-language nids
+   * only, so every non-default-language row would be purged with
+   * nothing to rebuild it. Working from the stored rows keeps the
+   * language dimension the table is keyed on.
+   */
+  public function testUpdateRequeuesTranslationRows(): void {
+    $this->setUpContainer([
+      ['nid' => 7, 'langcode' => 'en'],
+      ['nid' => 7, 'langcode' => 'fr'],
+      ['nid' => 7, 'langcode' => 'de'],
+    ]);
+
+    $this->runUpdate();
+
+    $this->assertSame([], $this->table);
+    $this->assertSame(
+      ['en', 'fr', 'de'],
+      array_column($this->queued, 'langcode'),
+    );
+  }
+
+  /**
+   * The purge must be batched rather than done in one pass.
+   *
+   * An unbatched truncate on a large site can empty the table and then
+   * exceed max_execution_time while queueing, leaving the update marked
+   * failed with no stored markdown and nothing queued to rebuild it.
+   */
+  public function testUpdateBatchesLargeTables(): void {
+    $this->setUpContainer($this->rows(250));
+
+    [, $passes] = $this->runUpdate();
+
+    $this->assertGreaterThan(1, $passes, 'The update ran in a single pass.');
+    $this->assertSame([], $this->table);
+    $this->assertCount(250, $this->queued);
+  }
+
+  /**
+   * Progress must be reported so drush can render a batch.
+   */
+  public function testUpdateReportsProgressWhileIncomplete(): void {
+    $this->setUpContainer($this->rows(250));
+
+    $sandbox = [];
+    llm_content_update_11003($sandbox);
+
+    $this->assertGreaterThan(0, $sandbox['#finished']);
+    $this->assertLessThan(1, $sandbox['#finished']);
+  }
+
+  /**
+   * Per-node cache tags must be invalidated alongside the rows.
+   *
+   * /node/N/llm-md responses carry only a node:N tag, so invalidating
+   * llm_content:list alone would leave them serving the pre-fix body
+   * out of the page cache indefinitely.
+   */
+  public function testUpdateInvalidatesPerNodeCacheTags(): void {
+    $this->setUpContainer($this->rows(2));
+
+    $this->runUpdate();
+
+    $this->assertContains('node:1', $this->invalidated);
+    $this->assertContains('node:2', $this->invalidated);
+  }
+
+  /**
+   * The cached llms.txt and llms-full.txt bodies must be invalidated.
    */
   public function testUpdateInvalidatesListCacheTag(): void {
-    $this->setUpContainer(['article'], [10]);
+    $this->setUpContainer($this->rows(1));
 
-    llm_content_update_11003();
+    $this->runUpdate();
 
     $this->assertContains('llm_content:list', $this->invalidated);
   }
 
   /**
-   * The operator is told the endpoints are incomplete until drained.
+   * The operator is told how the queue actually drains.
+   *
+   * The worker is time-bounded at 60 seconds per cron run; the "100 per
+   * run" figure is LlmContentHooks::cron()'s queueing cap, which this
+   * update bypasses by enqueueing everything up front.
    */
-  public function testUpdateReturnsOperatorGuidance(): void {
-    $this->setUpContainer(['article'], [10]);
+  public function testUpdateReturnsAccurateOperatorGuidance(): void {
+    $this->setUpContainer($this->rows(2));
 
-    $message = llm_content_update_11003();
+    [$message] = $this->runUpdate();
 
     $this->assertStringContainsString('queue:run llm_content_markdown_generation', $message);
+    $this->assertStringNotContainsString('100 items per cron run', $message);
   }
 
   /**
-   * With no enabled types the purge still happens and nothing is queued.
+   * An empty table finishes in one pass without queueing anything.
    */
-  public function testUpdatePurgesEvenWithNoEnabledTypes(): void {
-    $this->setUpContainer([], []);
+  public function testUpdateWithEmptyTableFinishesImmediately(): void {
+    $this->setUpContainer([]);
 
-    llm_content_update_11003();
+    [, $passes] = $this->runUpdate();
 
-    $this->assertSame(['llm_content_markdown'], $this->truncated);
+    $this->assertSame(1, $passes);
     $this->assertSame([], $this->queued);
+    $this->assertContains('llm_content:list', $this->invalidated);
   }
 
 }

@@ -174,18 +174,79 @@ function llm_content_update_11002(): void {
  * privileged user could contain content that user alone could see.
  *
  * Fixing the render path is not sufficient: existing rows already carry
- * whatever privilege level happened to write them. Drop them all and
- * queue every published node of an enabled type for regeneration under
- * the anonymous account.
+ * whatever privilege level happened to write them.
  *
- * The queue drains at 100 items per cron run, so /llms-full.txt and
- * /llms.txt stay thin until it catches up. Run
- * `drush queue:run llm_content_markdown_generation` to force it.
+ * Each pass takes a chunk of stored rows, queues each one for
+ * regeneration under the anonymous account, and deletes it. Working from
+ * the stored rows rather than from a node query matters on multilingual
+ * sites: a node query returns default-language nids only, so translation
+ * rows would be destroyed with nothing to rebuild them. Batching matters
+ * because the purge must not be able to half-finish — an unbatched
+ * truncate on a large site can empty the table and then time out.
+ *
+ * Cached per-node markdown is invalidated alongside each row. Those
+ * responses carry only a node:N tag, so invalidating llm_content:list
+ * alone would leave /node/N/llm-md serving the pre-fix body.
+ *
+ * @param array $sandbox
+ *   The batch context.
  */
-function llm_content_update_11003(): string {
-  \Drupal::database()->truncate('llm_content_markdown')->execute();
-  _llm_content_queue_missing_nodes();
-  Cache::invalidateTags(['llm_content:list']);
+function llm_content_update_11003(array &$sandbox): string {
+  $database = \Drupal::database();
 
-  return 'Purged stored markdown and queued regeneration. Until the queue drains, /llms.txt and /llms-full.txt will be incomplete — run `drush queue:run llm_content_markdown_generation` to finish now.';
+  if (!isset($sandbox['max'])) {
+    $sandbox['max'] = (int) $database->select('llm_content_markdown', 'm')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $sandbox['progress'] = 0;
+  }
+
+  if ($sandbox['max'] === 0) {
+    $sandbox['#finished'] = 1;
+    Cache::invalidateTags(['llm_content:list']);
+    return 'No stored markdown to purge.';
+  }
+
+  $rows = $database->select('llm_content_markdown', 'm')
+    ->fields('m', ['nid', 'langcode'])
+    ->orderBy('m.nid')
+    ->orderBy('m.langcode')
+    ->range(0, 100)
+    ->execute()
+    ->fetchAll();
+
+  $queue = \Drupal::queue('llm_content_markdown_generation');
+  $tags = [];
+  foreach ($rows as $row) {
+    $queue->createItem([
+      'nid' => (int) $row->nid,
+      'langcode' => $row->langcode,
+    ]);
+    $database->delete('llm_content_markdown')
+      ->condition('nid', $row->nid)
+      ->condition('langcode', $row->langcode)
+      ->execute();
+    $tags[] = 'node:' . $row->nid;
+    $sandbox['progress']++;
+  }
+
+  if ($tags !== []) {
+    Cache::invalidateTags(array_unique($tags));
+  }
+
+  // Rows are deleted as they are queued, so an empty pass means done.
+  $sandbox['#finished'] = $rows === []
+    ? 1
+    : min(0.99, $sandbox['progress'] / $sandbox['max']);
+
+  if ($sandbox['#finished'] >= 1) {
+    Cache::invalidateTags(['llm_content:list']);
+    return sprintf(
+      'Purged %d stored markdown rows and queued them for regeneration. Until the queue drains, /llms.txt and /llms-full.txt are incomplete — cron drains it for 60 seconds per run, or run `drush queue:run llm_content_markdown_generation` to finish now.',
+      $sandbox['progress'],
+    );
+  }
+
+  return sprintf('Purged and queued %d of %d rows.', $sandbox['progress'], $sandbox['max']);
 }

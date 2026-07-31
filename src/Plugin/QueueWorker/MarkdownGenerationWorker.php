@@ -63,6 +63,19 @@ final class MarkdownGenerationWorker extends QueueWorkerBase implements Containe
       $this->logger->notice('Node @nid not found, skipping.', ['@nid' => $nid]);
       return;
     }
+
+    // Convert the language the item was queued for. Without this the
+    // default translation is converted no matter which language was
+    // queued, so a translation's row can never be rebuilt in bulk — it
+    // is only ever regenerated on demand by a request to its own
+    // /llm-md route.
+    $langcode = $data['langcode'] ?? NULL;
+    if (is_string($langcode) && $langcode !== '' && $node->hasTranslation($langcode)) {
+      $node = $node->getTranslation($langcode);
+    }
+
+    // Checked after translation selection: each translation carries its
+    // own published status.
     if (!$node->isPublished()) {
       $this->logger->notice('Node @nid is unpublished, skipping.', ['@nid' => $nid]);
       return;

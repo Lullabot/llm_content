@@ -47,11 +47,21 @@ class LlmsTxtEntryFormatTest extends TestCase {
    *   The body summary, or NULL for none.
    * @param string $value
    *   The body value.
+   * @param bool $hasBody
+   *   Whether the node has a non-empty body field at all.
+   * @param array<int, string> $storedMarkdown
+   *   Stored markdown keyed by nid, used for the description fallback.
    *
    * @return string
    *   The generated llms.txt body.
    */
-  protected function renderFor(string $label, ?string $summary = NULL, string $value = ''): string {
+  protected function renderFor(
+    string $label,
+    ?string $summary = NULL,
+    string $value = '',
+    bool $hasBody = TRUE,
+    array $storedMarkdown = [],
+  ): string {
     $llmSettings = $this->createMock(ImmutableConfig::class);
     $llmSettings->method('get')->willReturnCallback(
       static fn (string $k) => $k === 'enabled_content_types' ? ['article'] : NULL,
@@ -82,7 +92,7 @@ class LlmsTxtEntryFormatTest extends TestCase {
 
     $storage = $this->createMock(EntityStorageInterface::class);
     $storage->method('getQuery')->willReturn($query);
-    $storage->method('loadMultiple')->willReturn([1 => $this->buildNode($label, $summary, $value)]);
+    $storage->method('loadMultiple')->willReturn([1 => $this->buildNode($label, $summary, $value, $hasBody)]);
 
     $etm = $this->createMock(EntityTypeManagerInterface::class);
     $etm->method('getStorage')->willReturn($storage);
@@ -107,7 +117,7 @@ class LlmsTxtEntryFormatTest extends TestCase {
     \Drupal::setContainer($container);
 
     $markdownConverter = $this->createMock(MarkdownConverterInterface::class);
-    $markdownConverter->method('getStoredMarkdownBatch')->willReturn([]);
+    $markdownConverter->method('getStoredMarkdownBatch')->willReturn($storedMarkdown);
 
     $stack = new RequestStack();
     $stack->push(Request::create('/llms.txt'));
@@ -120,7 +130,7 @@ class LlmsTxtEntryFormatTest extends TestCase {
   /**
    * Builds a node mock with a body field.
    */
-  protected function buildNode(string $label, ?string $summary, string $value): NodeInterface {
+  protected function buildNode(string $label, ?string $summary, string $value, bool $hasBody = TRUE): NodeInterface {
     $item = $this->createMock(FieldItemInterface::class);
     $item->method('__get')->willReturnCallback(
       static fn (string $property) => match ($property) {
@@ -131,8 +141,8 @@ class LlmsTxtEntryFormatTest extends TestCase {
     );
 
     $list = $this->createMock(FieldItemListInterface::class);
-    $list->method('isEmpty')->willReturn(FALSE);
-    $list->method('first')->willReturn($item);
+    $list->method('isEmpty')->willReturn(!$hasBody);
+    $list->method('first')->willReturn($hasBody ? $item : NULL);
 
     $node = $this->createMock(NodeInterface::class);
     $node->method('id')->willReturn('1');
@@ -269,6 +279,99 @@ class LlmsTxtEntryFormatTest extends TestCase {
     $output = $this->renderFor('Real Article', "  \n  ", 'The actual body.');
 
     $this->assertStringContainsString(': The actual body.', $output);
+  }
+
+  /**
+   * A markdown link in a description must not stay a link.
+   *
+   * Collapsing newlines stops the injected text becoming its own entry,
+   * but left inline it still renders as a live link attributed to this
+   * site. The title has been bracket-escaped all along; the description
+   * needs the same treatment.
+   *
+   * @covers ::llmsTxt
+   */
+  public function testDescriptionMarkdownLinkIsNeutralized(): void {
+    $output = $this->renderFor(
+      'Real Article',
+      'See [Official Docs](https://evil.example/x) for details',
+    );
+
+    $this->assertStringNotContainsString('[Official Docs]', $output);
+    $this->assertStringContainsString('See (Official Docs)(https://evil.example/x)', $output);
+  }
+
+  /**
+   * A bare "<" in prose must not swallow the rest of the description.
+   *
+   * PHP's strip_tags() reads "<100 KB before storage" as an
+   * unterminated tag and discards everything from the "<" onward,
+   * silently truncating legitimate copy mid-sentence.
+   *
+   * @covers ::llmsTxt
+   */
+  public function testSummaryKeepsTextAfterBareLessThan(): void {
+    $output = $this->renderFor(
+      'Real Article',
+      'Compresses uploads to <100 KB before storage',
+    );
+
+    $this->assertStringContainsString(
+      'Compresses uploads to <100 KB before storage',
+      $output,
+    );
+  }
+
+  /**
+   * Real tags are still removed even though strip_tags() is not used.
+   *
+   * @covers ::llmsTxt
+   */
+  public function testSummaryStillStripsRealTags(): void {
+    $output = $this->renderFor(
+      'Real Article',
+      'Safe <img src=x onerror=alert(1)> text',
+    );
+
+    $this->assertStringNotContainsString('onerror', $output);
+    // The gap the tag left behind is collapsed with the surrounding
+    // whitespace, so the words end up separated by a single space.
+    $this->assertStringContainsString('Safe text', $output);
+  }
+
+  /**
+   * Long node titles must not be truncated by the description cap.
+   *
+   * Titles are bounded at 255 characters by the node schema; cutting
+   * one at 200 makes the link text disagree with the page it points at.
+   *
+   * @covers ::llmsTxt
+   */
+  public function testLongTitleIsNotTruncated(): void {
+    $title = str_repeat('t', 240);
+
+    $output = $this->renderFor($title);
+
+    $this->assertStringContainsString("- [{$title}](/node/1/llm-md)", $output);
+  }
+
+  /**
+   * A body field present but empty must still reach the fallback.
+   *
+   * FieldItemList::isEmpty() is TRUE for an item holding only an empty
+   * value, so such a node has no usable description of its own and
+   * should fall through to its generated markdown.
+   *
+   * @covers ::llmsTxt
+   */
+  public function testEmptyBodyFallsBackToStoredMarkdown(): void {
+    $output = $this->renderFor(
+      'Real Article',
+      hasBody: FALSE,
+      storedMarkdown: [1 => "---\ntitle: \"x\"\n---\n\n# Real Article\n\nDerived description."],
+    );
+
+    $this->assertStringContainsString(': Derived description.', $output);
   }
 
   /**

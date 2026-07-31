@@ -78,24 +78,27 @@ final class LlmsTxtController extends ControllerBase {
           // Pre-fetch all stored markdown for this batch in one query.
           $batchMarkdown = $this->markdownConverter->getStoredMarkdownBatch($batch, $langcode);
           foreach ($nodes as $node) {
-            $title = $this->sanitizeEntryText($node->label() ?? 'Untitled');
-            // Neutralize markdown link syntax in the title so it cannot
-            // close the link and open another one.
-            $title = str_replace(['[', ']'], ['(', ')'], $title);
+            // Titles are not length-capped: a node title is already
+            // bounded at 255 characters, and truncating one would make
+            // the link text disagree with the page it points at.
+            $title = $this->sanitizeEntryText($node->label() ?? 'Untitled', NULL);
             $url = Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()])->toString();
             $description = '';
-            $body = $node->hasField('body') ? $node->get('body')->first() : NULL;
-            if ($body !== NULL) {
-              // Prefer the summary, but fall back to the body when it is
-              // absent — or when sanitizing leaves nothing behind, which
-              // a whitespace-only summary previously did not do.
-              $description = $this->sanitizeEntryText((string) $body->summary);
-              if ($description === '') {
-                $description = $this->sanitizeEntryText((string) $body->value);
+            if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
+              $body = $node->get('body')->first();
+              if ($body !== NULL) {
+                // Prefer the summary, falling back to the body value.
+                $description = $this->sanitizeEntryText((string) $body->summary);
+                if ($description === '') {
+                  $description = $this->sanitizeEntryText((string) $body->value);
+                }
               }
             }
-            else {
-              // Fallback: use batch-fetched markdown instead of per-node query.
+            if ($description === '') {
+              // Nothing usable on the node itself — derive a description
+              // from the batch-fetched markdown. Reached both when the
+              // node has no body field and when the field is present but
+              // holds nothing worth printing.
               $stored = $batchMarkdown[(int) $node->id()] ?? '';
               $stored = preg_replace('/^---\n.*?\n---\n+/s', '', $stored) ?? $stored;
               $stored = preg_replace('/^# .+\n+/', '', $stored) ?? $stored;
@@ -142,17 +145,25 @@ final class LlmsTxtController extends ControllerBase {
    * content, in a file LLM crawlers treat as site-endorsed. Anyone with
    * edit access to any enabled bundle can write one.
    *
-   * Collapsing whitespace runs to single spaces closes that, and the
-   * length cap keeps one node from crowding out the rest of the index.
+   * Collapsing whitespace runs to single spaces closes that. Brackets
+   * are neutralized for the same reason they are in the title: left
+   * alone, "See [Official Docs](https://evil.example)" renders as a
+   * live off-site link presented as this site's own content.
    *
    * @param string $text
    *   The raw author-supplied text.
+   * @param int|null $maxLength
+   *   Maximum length in characters, or NULL for no cap.
    *
    * @return string
    *   Text safe to interpolate into a single llms.txt line.
    */
-  protected function sanitizeEntryText(string $text): string {
-    $text = strip_tags($text);
+  protected function sanitizeEntryText(string $text, ?int $maxLength = self::ENTRY_MAX_LENGTH): string {
+    // Remove tag-shaped markup only. strip_tags() would treat a bare
+    // "<" as the start of an unterminated tag and swallow the rest of
+    // the string, so a summary reading "Compresses uploads to <100 KB"
+    // would lose everything from the "<" onward.
+    $text = preg_replace('#</?[a-z][^>]*>#i', '', $text) ?? $text;
 
     // Collapse newlines, tabs, and runs of spaces into single spaces.
     // The /u pattern returns NULL on invalid UTF-8, so fall back to the
@@ -169,7 +180,12 @@ final class LlmsTxtController extends ControllerBase {
       $stripped = $collapsed;
     }
 
-    return mb_substr(trim($stripped), 0, self::ENTRY_MAX_LENGTH);
+    // Neutralize markdown link syntax so the text cannot close the
+    // entry's own link or open one of its own.
+    $stripped = str_replace(['[', ']'], ['(', ')'], $stripped);
+    $stripped = trim($stripped);
+
+    return $maxLength === NULL ? $stripped : mb_substr($stripped, 0, $maxLength);
   }
 
   /**

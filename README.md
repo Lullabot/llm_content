@@ -40,6 +40,19 @@ Navigate to **Administration > Configuration > Content > LLM Content Settings** 
 | `/llms-full.txt` | Full markdown of all enabled content concatenated | `access content` |
 | `/sitemap-llm.xml` | XML sitemap listing all markdown URLs (can be disabled) | `access content` |
 
+All four answer `GET` and `HEAD` only. Other methods return 405: Drupal's
+page cache declines to serve non-cacheable methods, so an unrestricted
+`POST` would re-run the controller on every request with no rate limit.
+
+None of them read query parameters, and a request carrying any is
+answered with a 301 to the bare path. Without that, `?x=1` … `?x=N` each
+occupy their own page-cache entry holding a full copy of the response —
+on a 2,000-node site that is roughly 14 MB of cache per junk URL.
+
+Content is rendered as the anonymous user regardless of who triggers the
+generation, so the stored markdown can never contain more than an
+anonymous visitor is entitled to see.
+
 ### Example: Individual Node Markdown
 
 ```
@@ -132,10 +145,25 @@ If you prefer to use xmlsitemap exclusively, check "Disable built-in /sitemap-ll
 - Individual node endpoints respect Drupal's entity access system (`node.view`)
 - Listing endpoints require `access content` permission
 - Only published nodes of enabled content types are exposed
+- Markdown is rendered as the anonymous user, so referenced entities the
+  saving user could see but the public cannot are never stored
 - YAML frontmatter values are sanitized against injection
+- `llms.txt` titles and descriptions are collapsed to a single line each, so
+  author-supplied text cannot pose as an additional entry
 - URI schemes in markdown links use an allowlist (http, https, mailto, tel, relative paths)
 - XML sitemap uses `XMLWriter` for safe generation
+- Endpoints answer `GET`/`HEAD` only and redirect away query strings, so
+  neither can be used to bypass the page cache
 - All responses include `X-Content-Type-Options: nosniff`
+
+### Upgrading
+
+Update `11003` clears `llm_content_markdown` and requeues every published
+node of an enabled type. Rows written before that update were rendered in
+the request context of whoever saved the node, so they may contain
+content the public cannot see. Until the queue drains — 100 items per
+cron run — `/llms.txt` and `/llms-full.txt` are incomplete; run
+`drush queue:run llm_content_markdown_generation` to finish immediately.
 
 ## Permissions
 

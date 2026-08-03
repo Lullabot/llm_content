@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace Drupal\Tests\llm_content\Unit;
 
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
+use Drupal\Core\Cache\Context\CacheContextsManager;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\GeneratedUrl;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Queue\QueueInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Routing\UrlGeneratorInterface;
 use Drupal\llm_content\Hook\LlmContentHooks;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
 use Drupal\llm_content\Service\XmlSitemapLinkManagerInterface;
@@ -58,22 +61,37 @@ class LlmContentHooksTest extends TestCase {
   protected QueueInterface $queue;
 
   /**
+   * Mock route match.
+   */
+  protected RouteMatchInterface $routeMatch;
+
+  /**
+   * The container the hooks run against.
+   */
+  protected ContainerBuilder $container;
+
+  /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
     parent::setUp();
 
-    // Cache::invalidateTags() calls the static \Drupal container.
+    // Cache::invalidateTags() and Cache::mergeContexts() call the static
+    // \Drupal container.
     $container = new ContainerBuilder();
     $container->set('cache_tags.invalidator', $this->createMock(CacheTagsInvalidatorInterface::class));
+    $cacheContextsManager = $this->createMock(CacheContextsManager::class);
+    $cacheContextsManager->method('assertValidTokens')->willReturn(TRUE);
+    $container->set('cache_contexts_manager', $cacheContextsManager);
     \Drupal::setContainer($container);
+    $this->container = $container;
 
     $this->markdownConverter = $this->createMock(MarkdownConverterInterface::class);
     $this->configFactory = $this->createMock(ConfigFactoryInterface::class);
     $this->xmlSitemapLinkManager = $this->createMock(XmlSitemapLinkManagerInterface::class);
     $this->queueFactory = $this->createMock(QueueFactory::class);
     $this->queue = $this->createMock(QueueInterface::class);
-    $routeMatch = $this->createMock(RouteMatchInterface::class);
+    $this->routeMatch = $this->createMock(RouteMatchInterface::class);
 
     $this->queueFactory->method('get')
       ->with('llm_content_markdown_generation')
@@ -84,7 +102,7 @@ class LlmContentHooksTest extends TestCase {
       $this->configFactory,
       $this->xmlSitemapLinkManager,
       $this->queueFactory,
-      $routeMatch,
+      $this->routeMatch,
     );
   }
 
@@ -222,6 +240,117 @@ class LlmContentHooksTest extends TestCase {
     $this->queue->expects($this->never())->method('createItem');
 
     $this->hooks->entityInsert($entity);
+  }
+
+  /**
+   * Prepares a node canonical route match and a stubbed URL generator.
+   */
+  protected function setUpPageAttachments(NodeInterface $node): void {
+    $this->routeMatch->method('getRouteName')->willReturn('entity.node.canonical');
+    $this->routeMatch->method('getParameter')->with('node')->willReturn($node);
+
+    $generatedUrl = (new GeneratedUrl())
+      ->setGeneratedUrl('/node/' . $node->id() . '/markdown');
+    $generatedUrl->addCacheTags(['llm_content:url']);
+    $generatedUrl->addCacheContexts(['url.site']);
+
+    $urlGenerator = $this->createMock(UrlGeneratorInterface::class);
+    $urlGenerator->method('generateFromRoute')->willReturn($generatedUrl);
+    $this->container->set('url_generator', $urlGenerator);
+  }
+
+  /**
+   * Tests that attachments added by other modules survive.
+   *
+   * GeneratedUrl::applyTo() assigns $page['#attached'] wholesale, so applying
+   * it directly discards everything earlier hook_page_attachments()
+   * implementations contributed.
+   *
+   * @covers ::pageAttachments
+   */
+  public function testPageAttachmentsPreservesExistingAttachments(): void {
+    $this->setUpConfig();
+    $node = $this->createMockNode();
+    $this->setUpPageAttachments($node);
+
+    $page = [
+      '#attached' => [
+        'library' => ['other_module/other_library'],
+        'html_head' => [
+          [['#tag' => 'meta', '#attributes' => ['name' => 'other']], 'other_module_meta'],
+        ],
+      ],
+    ];
+
+    $this->hooks->pageAttachments($page);
+
+    $this->assertSame(['other_module/other_library'], $page['#attached']['library']);
+
+    $keys = array_column($page['#attached']['html_head'], 1);
+    $this->assertContains('other_module_meta', $keys);
+    $this->assertContains('llm_content_alternate', $keys);
+  }
+
+  /**
+   * Tests that the alternate link and URL cacheability are both applied.
+   *
+   * @covers ::pageAttachments
+   */
+  public function testPageAttachmentsAddsAlternateLinkAndCacheability(): void {
+    $this->setUpConfig();
+    $node = $this->createMockNode();
+    $this->setUpPageAttachments($node);
+
+    $page = [
+      '#cache' => [
+        'tags' => ['other_module:tag'],
+        'contexts' => ['languages:language_interface'],
+      ],
+    ];
+
+    $this->hooks->pageAttachments($page);
+
+    $link = $page['#attached']['html_head'][0][0];
+    $this->assertSame('link', $link['#tag']);
+    $this->assertSame('alternate', $link['#attributes']['rel']);
+    $this->assertSame('text/markdown', $link['#attributes']['type']);
+    $this->assertSame('/node/1/markdown', $link['#attributes']['href']);
+
+    $this->assertContains('other_module:tag', $page['#cache']['tags']);
+    $this->assertContains('llm_content:url', $page['#cache']['tags']);
+    $this->assertContains('languages:language_interface', $page['#cache']['contexts']);
+    $this->assertContains('url.site', $page['#cache']['contexts']);
+  }
+
+  /**
+   * Tests that pages outside the node canonical route are untouched.
+   *
+   * @covers ::pageAttachments
+   */
+  public function testPageAttachmentsSkipsNonNodeRoutes(): void {
+    $this->routeMatch->method('getRouteName')->willReturn('system.admin');
+
+    $page = ['#attached' => ['library' => ['other_module/other_library']]];
+    $this->hooks->pageAttachments($page);
+
+    $this->assertSame(['#attached' => ['library' => ['other_module/other_library']]], $page);
+  }
+
+  /**
+   * Tests that unpublished nodes get no alternate link.
+   *
+   * @covers ::pageAttachments
+   */
+  public function testPageAttachmentsSkipsUnpublishedNode(): void {
+    $this->setUpConfig();
+    $node = $this->createMockNode(published: FALSE);
+    $this->routeMatch->method('getRouteName')->willReturn('entity.node.canonical');
+    $this->routeMatch->method('getParameter')->with('node')->willReturn($node);
+
+    $page = [];
+    $this->hooks->pageAttachments($page);
+
+    $this->assertSame([], $page);
   }
 
 }

@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityInterface;
 // phpcs:ignore Drupal.Classes.UnusedUseStatement.UnusedUse -- Used by #[Hook] attributes.
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Queue\QueueFactory;
+use Drupal\Core\Render\BubbleableMetadata;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Url;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
@@ -85,7 +86,6 @@ final class LlmContentHooks {
     }
     /** @var \Drupal\Core\GeneratedUrl $generatedUrl */
     $generatedUrl = Url::fromRoute('llm_content.markdown_view', ['node' => $node->id()])->toString(TRUE);
-    $generatedUrl->applyTo($page);
     $page['#attached']['html_head'][] = [
       [
         '#tag' => 'link',
@@ -97,6 +97,11 @@ final class LlmContentHooks {
       ],
       'llm_content_alternate',
     ];
+    // Merge cacheability from the generated URL without clobbering
+    // attachments added by earlier page_attachments hooks.
+    BubbleableMetadata::createFromRenderArray($page)
+      ->merge(BubbleableMetadata::createFromObject($generatedUrl))
+      ->applyTo($page);
   }
 
   /**

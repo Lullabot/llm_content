@@ -6,6 +6,14 @@ services:
   Drupal\llm_content\Service\MarkdownConverterInterface:
     class: Drupal\llm_content\Service\MarkdownConverter
 
+  # The share of the PHP memory limit at which markdown generation stops and
+  # waits for a fresh process. Override in a site's services.yml to tune the
+  # headroom left for one more node render.
+  Drupal\llm_content\Service\MemoryGuardInterface:
+    class: Drupal\llm_content\Service\MemoryGuard
+    arguments:
+      - 0.75
+
   Drupal\llm_content\Service\XmlSitemapLinkManagerInterface:
     class: Drupal\llm_content\Service\XmlSitemapLinkManager
     arguments:

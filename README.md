@@ -103,6 +103,30 @@ Returns a directory-style listing following the [llms.txt specification](https:/
 5. The result is stored in a custom database table (`llm_content_markdown`) for fast retrieval
 6. Endpoints serve the stored markdown with appropriate cache tags for automatic invalidation
 
+### Memory use when draining a backlog
+
+Generating markdown renders a whole node per queue item, and PHP does not reclaim all of that between items, so a long-running process grows steadily. A large backlog — after a fresh install on an existing site, or after update 11003 purges the table — can therefore exhaust the PHP memory limit mid-item and kill cron.
+
+To prevent that, the queue worker checks memory before each item and suspends the queue once usage reaches 75% of the PHP memory limit. Cron then skips the queue for the rest of that run and resumes on the next one, in a fresh process. Nothing is lost: the claimed item is released back to the queue.
+
+Because each cron run only drains what fits in one process, a large backlog takes many runs. To drain it sooner, run the queue directly, repeatedly, so each batch starts with fresh memory:
+
+```bash
+drush queue:run llm_content_markdown_generation --items-limit=100
+```
+
+Note that `drush queue:run` exits non-zero when a queue suspends, so a loop around it should tolerate that exit status.
+
+The threshold can be tuned in a site's `services.yml`. Leave headroom for one more node render:
+
+```yaml
+services:
+  Drupal\llm_content\Service\MemoryGuardInterface:
+    class: Drupal\llm_content\Service\MemoryGuard
+    arguments:
+      - 0.6
+```
+
 ## XML Sitemap Integration
 
 The module optionally integrates with the [XML Sitemap](https://www.drupal.org/project/xmlsitemap) contrib module. When xmlsitemap is installed, LLM content URLs can be included in the site's main XML sitemap instead of (or in addition to) the built-in `/sitemap-llm.xml`.

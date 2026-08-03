@@ -7,7 +7,9 @@ namespace Drupal\llm_content\Plugin\QueueWorker;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\Queue\QueueWorkerBase;
+use Drupal\Core\Queue\SuspendQueueException;
 use Drupal\llm_content\Service\MarkdownConverterInterface;
+use Drupal\llm_content\Service\MemoryGuardInterface;
 use Drupal\node\NodeInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -30,6 +32,7 @@ final class MarkdownGenerationWorker extends QueueWorkerBase implements Containe
     protected MarkdownConverterInterface $markdownConverter,
     protected EntityTypeManagerInterface $entityTypeManager,
     protected LoggerInterface $logger,
+    protected MemoryGuardInterface $memoryGuard,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }
@@ -45,6 +48,7 @@ final class MarkdownGenerationWorker extends QueueWorkerBase implements Containe
       $container->get(MarkdownConverterInterface::class),
       $container->get('entity_type.manager'),
       $container->get('logger.factory')->get('llm_content'),
+      $container->get(MemoryGuardInterface::class),
     );
   }
 
@@ -52,6 +56,25 @@ final class MarkdownGenerationWorker extends QueueWorkerBase implements Containe
    * {@inheritdoc}
    */
   public function processItem($data): void {
+    // Stop before the render rather than after it. Converting one node costs
+    // several MB and that memory is not reclaimed between items, so a process
+    // that is already close to the limit has no headroom for another one —
+    // checking afterwards would mean the damage is already done.
+    //
+    // Deliberately thrown without a delay. Core only re-runs a suspended
+    // queue inside the same cron run when the exception is delayable
+    // (\Drupal\Core\Cron::processQueues()), and it does so after a usleep()
+    // in the same PHP process. Sleeping does not free memory, so a delayable
+    // exception here would trip the guard again immediately and spin until
+    // max_execution_time killed cron. With no delay the queue is skipped for
+    // the rest of this run and resumes on the next one, in a fresh process.
+    if ($this->memoryGuard->isNearLimit()) {
+      throw new SuspendQueueException(sprintf(
+        'Suspending markdown generation: %s is in use. The queue resumes on the next cron run; to drain a backlog sooner run `drush queue:run llm_content_markdown_generation --items-limit=100` repeatedly, so each batch gets a fresh process.',
+        $this->memoryGuard->describe(),
+      ));
+    }
+
     if (empty($data['nid'])) {
       $this->logger->warning('Queue item missing nid, skipping.');
       return;
